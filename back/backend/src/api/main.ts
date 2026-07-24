@@ -94,6 +94,7 @@ async function main() {
       operatorSigner,
       usdc: cfg.usdc,
       metadataBaseUrl: cfg.metadataBaseUrl,
+      ensParentName: cfg.ens?.parentName,
       ownerTenantId: i.tenantId,
       specJson: i.specJson,
       fundAmount: i.fundAmount,

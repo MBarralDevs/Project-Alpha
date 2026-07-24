@@ -32,6 +32,14 @@ export function mountMcpRoute(app: Hono<{ Variables: AuthVars }>, deps: ApiDeps)
       maxJobBudget: deps.maxJobBudget,
       maxInflightJobsPerTenant: deps.maxInflightJobsPerTenant,
       linkCodes: deps.linkCodes,
+      arc: deps.arc,
+      ens: deps.ens
+        ? {
+            parentName: deps.ens.parentName,
+            identityRegistry: deps.ens.identityRegistry,
+            chainId: deps.ens.chainId,
+          }
+        : undefined,
     });
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
