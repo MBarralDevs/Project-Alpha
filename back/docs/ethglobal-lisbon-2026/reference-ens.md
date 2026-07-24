@@ -29,6 +29,25 @@ Total: ~12–16 h. Steps 1+2+3 are the night-0 de-risk set.
 
 ## 2. Name registration (Sepolia, ensjs 4.3.1)
 
+> **⚠️ 2026-07-24 FIELD CORRECTION — this whole ensjs-4.3.1 registration path is BROKEN on live Sepolia.**
+> ENS rotated the Sepolia registrar controllers. ensjs 4.3.1 AND the ENS wiki both name
+> `0xfb3cE5D01e0f33f41DbB39035dB9745962F1f968` as the ETHRegistrarController, but on-chain it is
+> **no longer an authorized controller** on the BaseRegistrar `0x57f1887a…` — `register()` reverts
+> with empty data (message-less `require(controllers[msg.sender])` inside `base.register`). Verified via
+> local trace. The BaseRegistrar's 5 currently-authorized controllers are
+> `0xdf60C561Ca35AD3C89D24BbA854654b1c3477078` (the only one with a `register()` fn — but a NEW ABI:
+> `rentPrice`/`commit`/`makeCommitment` all revert with the old signatures), plus `0x802453f2…`,
+> `0xB359d7d0…`, `0x1BE516Ae…`, `0x6F4Bf58A…`. The `@ensdomains/ensjs@5.0.0-sepolia-fix.1` pre-release
+> points at `0x253553366…` which has **no code on Sepolia** (it's the mainnet controller). So there is
+> no working programmatic path via ensjs today.
+>
+> **What actually works:** register the parent name in the browser via **https://sepolia.app.ens.domains**
+> (it uses the correct live controller), then set its resolver to our deployed OffchainResolver there too.
+> Everything else in this doc (resolver deploy §3, gateway §4, records §5, ENSIP-25 §6) is
+> controller-independent and unaffected. If a programmatic path is later needed, fetch `0xdf60…`'s ABI
+> (Sourcify/Etherscan-V2) and call it directly, or wait for a fixed ensjs Sepolia release.
+
+
 ### 2.0 Ground truth (all live-verified 2026-07-24)
 
 **Sepolia addresses** (docs.ens.domains/learn/deployments **and** ensjs 4.3.1 `dist/contracts/consts.js` — both agree):
