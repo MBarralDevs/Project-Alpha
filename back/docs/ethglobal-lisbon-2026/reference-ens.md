@@ -41,11 +41,18 @@ Total: ~12–16 h. Steps 1+2+3 are the night-0 de-risk set.
 > points at `0x253553366…` which has **no code on Sepolia** (it's the mainnet controller). So there is
 > no working programmatic path via ensjs today.
 >
-> **What actually works:** register the parent name in the browser via **https://sepolia.app.ens.domains**
-> (it uses the correct live controller), then set its resolver to our deployed OffchainResolver there too.
-> Everything else in this doc (resolver deploy §3, gateway §4, records §5, ENSIP-25 §6) is
-> controller-independent and unaffected. If a programmatic path is later needed, fetch `0xdf60…`'s ABI
-> (Sourcify/Etherscan-V2) and call it directly, or wait for a fixed ensjs Sepolia release.
+> **✅ SOLVED (programmatic V2 path) — see `scripts/ens-register-v2.mts`.** ENS V2 registration is now
+> **single-step, no commit-reveal** (confirmed by on-chain trace). Call `register(registration)` on the V2
+> controller **`0xdf60C561Ca35AD3C89D24BbA854654b1c3477078`** with the same struct
+> `(string label, address owner, uint256 duration, bytes32 secret, address resolver, bytes[] data, uint8
+> reverseRecord, bytes32 referrer)` — `secret` can be `0x0`, pass OUR resolver in `resolver`, payable
+> (over-send, excess refunded; testnet price ~0). One tx, done. **CRITICAL WIN: V2 writes through to the
+> classic ENS Registry `0x0000…2e1e`** — after registering, `registry.owner(node)` and
+> `registry.resolver(node)` both reflect our values, so viem/UniversalResolver + ENSIP-10 wildcard + CCIP
+> resolve normally. **`novicorpus.eth` REGISTERED 2026-07-24** (owner `0x8ffA…6e2f`, resolver
+> `0x50968D0D84fc491c11cedA2999C5eF5Aa1D66473`); wildcard subname `resolve()` reverts `OffchainLookup`
+> pointing at our gateway URL — verified. The old ensjs-4.3.1 commit-reveal path (below) is dead; use the
+> V2 script. (Browser fallback if ever needed: the ENS V2 app at **app.ens.dev**, verified official.)
 
 
 ### 2.0 Ground truth (all live-verified 2026-07-24)
