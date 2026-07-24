@@ -3,6 +3,12 @@
 Research date: 2026-07-24. All facts verified against live docs, npm, on-chain state, and this repo.
 Constraint honored throughout: **core contracts stay on Arc**; every integration is additive.
 
+> **⚠ 2026-07-24 evening — corrections applied.** A second verification pass produced the
+> authoritative per-stack build references (`reference-thegraph.md`, `reference-world.md`,
+> `reference-ens.md` — each with a "deltas" section). Corrections found there have been
+> patched into this file; where this summary and a reference doc disagree, **the reference
+> doc wins**.
+
 Unifying narrative: **"The trust stack for agent legal bodies"**
 - Who is the human? → World ID (guardian proof-of-personhood)
 - What is it called / how to verify? → ENS + ENSIP-25 (↔ our ERC-8004 on Arc)
@@ -23,7 +29,7 @@ Unifying narrative: **"The trust stack for agent legal bodies"**
 ### Toolchain
 - `@graphprotocol/graph-cli@0.98.1`, `graph-ts@0.38.2`; manifest `specVersion: 1.3.0`, `apiVersion: 0.0.9`.
 - ABIs: extract from Foundry `out/*.json` (`['abi']`).
-- Flow: `graph init --product subgraph-studio --from-contract 0x9199… --network arc-testnet --abi ./abis/LegalManagerFactory.json novi-corpus-arc` → codegen/build → `graph auth <KEY>` → `graph deploy novi-corpus-arc`.
+- Flow: `graph init --from-contract 0x9199… --network arc-testnet --abi ./abis/LegalManagerFactory.json novi-corpus-arc` (CORRECTED: the `--product` flag no longer exists in graph-cli 0.98.1) → codegen/build → `graph auth <KEY>` → `graph deploy novi-corpus-arc`.
 - Studio deploy alone is queryable free: `https://api.studio.thegraph.com/query/<uid>/<slug>/version/latest` (3k q/day, no auth). Publish (Arbitrum One tx) optional; testnets served by Edge & Node upgrade indexer (best-effort, auto-pruning, no time-travel). Gateway free plan 100k q/month.
 - Templates: `TreasuryTemplate.createWithContext(addr, ctx)` with `ctx.setString("agentId", …)`; read via `dataSource.context()`. Templates index from creation block only (fine).
 - Schema: entities AgentEntity / Treasury / SpendEvent(immutable) / PolicyProposal / Incident + timeseries `SpendPoint` with `@aggregation(intervals:["hour","day"])` (hour/day ONLY). Emit SpendPoint from BOTH `Spent` and `OperatorFunded` (both consume cap on-chain).
@@ -31,8 +37,9 @@ Unifying narrative: **"The trust stack for agent legal bodies"**
 
 ### Governed x402 pay-per-query (the differentiator)
 - `@graphprotocol/client-x402` v1.0.0: **raw private key only, NO hooks/max-price** — silently pays. Don't use it; we speak x402 natively.
-- Endpoints (any subgraph by ID): prod `https://gateway.thegraph.com/api/x402/subgraphs/id/<ID>` (Base mainnet); **testnet `https://testnet.gateway.thegraph.com/api/x402/subgraphs/id/<ID>` (Base Sepolia, eip155:84532)**. $0.01 USDC/query, EIP-3009 (no ETH gas needed), no refunds on empty results.
-- Build: point our `buyWithX402` (payments/buyer.ts) at the testnet gateway with a Base-Sepolia `signX402` variant (swap Arc chain params for Base Sepolia chainId/USDC); `authorize` runs `evaluatePolicy` + pending ledger first. New `payments/graphQuery.ts` mirrors `entityPayment.ts` (idempotency → policy → pay → settle ledger).
+- Endpoints (any subgraph by ID): prod `https://gateway.thegraph.com/api/x402/subgraphs/id/<ID>` (Base mainnet, $0.01/query); **testnet `https://gateway.testnet.thegraph.com/api/x402/subgraphs/id/<ID>`** (CORRECTED host — `testnet.gateway.…` is NXDOMAIN) (Base Sepolia, eip155:84532, testnet price 42 atomic units ≈ $0.000042). EIP-3009 (no ETH gas needed), no refunds on empty results.
+- **The gateway speaks x402 v2, not v1** (CORRECTED): empty 402 body, challenge in `PAYMENT-REQUIRED` header, `amount` field, pay via `PAYMENT-SIGNATURE` header — our v1 `buyWithX402` cannot be pointed at it as-is. Build a small v2 sibling (see reference-thegraph.md §7); the `evaluatePolicy` + pending-ledger chokepoint is reused unchanged. Base Sepolia USDC EIP-3009 domain name is `"USDC"` (Base mainnet: `"USD Coin"`) — both arrive in the challenge's `extra`. New `payments/graphQuery.ts` mirrors `entityPayment.ts` (idempotency → policy → pay → settle ledger).
+- **Paid-leg caveat:** the x402 gateway serves *published* network subgraphs — a Studio-only deployment may not be reachable through it. Publish ours (small Arbitrum One tx) before demoing the paid leg, or demo against a known published subgraph id.
 - Fund payer key: Circle faucet (faucet.circle.com) Base Sepolia USDC — 1 USDC = 100 queries. Stretch: Gateway unified-balance mint from Arc float (new adapter surface, ~2–3h; faucet is the safety net).
 - MCP tools (buildMcpServer idiom, optional-deps pattern): `treasury_history` (read cap) + `query_subgraph_x402` (spend cap, policy-gated).
 - Guardian alert watcher: ~80 LOC cursor poll (`incidents`, `policyProposals(status: SCHEDULED)`) every ~15s → dashboard. Demo: live pause → alert.
@@ -57,7 +64,7 @@ Hours: subgraph 5–7 · watcher 2–3 · governed x402 + MCP 4–6 · SKILL/vid
 - Packages: `@worldcoin/idkit@4.2.1` (React `IDKitRequestWidget`), `idkit-core@4.2.2` (vanilla `IDKit.request`), signing via `idkit-core/signing` (`signRequest`).
 - Portal (developer.world.org): app → `app_id` + **`rp_id`** + **`signing_key`**; action `guardian-verification`.
 - **Mandatory rp_context**: backend route calls `signRequest({signingKeyHex, action, ttl:300})` → widget prop `rp_context`.
-- Widget: `preset={orbLegacy({ signal: tenantWalletAddress })}`, `allow_legacy_proofs: true`; desktop = built-in QR → World App → bridge poll.
+- Widget: `preset={proofOfHuman({ signal: tenantWalletAddress })}` (CORRECTED: docs now recommend `proofOfHuman` — v4 with automatic legacy-Orb fallback — over `orbLegacy`), `allow_legacy_proofs: true`; desktop = built-in QR → World App → bridge poll. Staging is action-level, not a separate app.
 - Verify: `POST https://developer.world.org/api/v4/verify/{rp_id}` — forward IDKit payload AS-IS. Response has `nullifier`, `results[].identifier`, `issuer_schema_id`.
 - **Backend must dedupe nullifiers** (same human+action = same nullifier): SQLite `guardian_verifications (nullifier, action UNIQUE)`, tenant link, N-entities-per-human cap enforced in our DB at `runner.start()`.
 - Enforcement: accept Orb (`proof_of_human`, issuer_schema_id 1) + Secure Document/Passport tier; reject Device/Selfie for guardianship. Check server-side via `results[].identifier`.
@@ -67,11 +74,12 @@ Hours: subgraph 5–7 · watcher 2–3 · governed x402 + MCP 4–6 · SKILL/vid
 
 ### AgentKit (agent-side + seller-side)
 - Registration: `npx @worldcoin/agentkit-cli register <agent-address>` — address is ANY EVM address (our Arc operator EOA fine); human scans QR in World App; hosted relay `https://x402-worldchain.vercel.app` pays gas. **Requires a real Orb-verified human (AgentBook groupId=1, verified on-chain); no simulator path.** ~2 min, $0, permanent. **Do this BEFORE the weekend.**
-- AgentBook: World Chain mainnet `0xA23aB2712eA7BBa896930544C7d6636a96b944dA` — `lookupHuman(address)→uint256 humanId (nullifier)`, `getNextNonce`. Multiple agents per human: yes. No revoke function (our guardian clawback is the answer — honest pitch point). Base Sepolia deployment exists (same addr) but still needs real Orb proof + no default relay.
+- **⚠ R1 (HIGH, discovered in reference pass):** the published CLI 0.2.0 pins the v3 identity bridge, but World IDs created after 2026-06-01 are v4-only — a human freshly Orb-verified at the venue may be UNABLE to complete AgentBook registration. Register tonight with a pre-June-2026 World ID if possible, or test registration immediately after the venue Orb verification while there's time to find another verified person.
+- AgentBook: World Chain mainnet `0xA23aB2712eA7BBa896930544C7d6636a96b944dA` — `lookupHuman(address)→uint256 humanId (nullifier)`, `getNextNonce`. Multiple agents per human: yes. No revoke function (our guardian clawback is the answer — honest pitch point). **CORRECTED: Base Sepolia is NOT a working fallback** — repo docs describing a Base-default CLI with `--network` are drift; the published CLI registers only on World Chain via the hosted relay. `lookupHuman` swallows RPC errors as `null` (fail-closed to payment) — cache positive lookups in SQLite.
 - Client: `createAgentkitClient({signer})`; signer = `{address, chainId /*CAIP-2, eip155:5042002 OK*/, type:'eip191', signMessage}` — one `personal_sign`; Turnkey-compatible (add signMessage to OperatorSigner) or pocket EOA fallback (15 min). `agentkit.fetch` only acts on 402s with `extensions.agentkit` in JSON body — composes cleanly in FRONT of our `buyWithX402` (wrap `fetchImpl` in entityPayment.ts).
-- **Seller seam (fully separable — "paid route can run on any EVM chain"; Arc even ships as built-in default RPC in the SDK):** do NOT adopt their resource server. Manual API: `parseAgentkitHeader` → `validateAgentkitMessage` (domain/uri binding, ≤5min, nonce) → `verifyAgentkitSignature` (SIWE recover) → `createAgentBookVerifier().lookupHuman(addr)` (read-only World Chain RPC `https://worldchain-mainnet.g.alchemy.com/public`). In `buildPaywall` (payments/seller.ts) before the X-PAYMENT branch: grant N free-trial 200s per humanId (SQLite usage counter), else fall through to existing 402 → Circle Gateway settlement on Arc UNTOUCHED.
-- 402 body: `declareAgentkitExtension({domain, resourceUri, network:'eip155:5042002', statement})` — must hand-mint `info.nonce` + `issuedAt` (+expirationTime); top-level `extensions` key next to `accepts`.
-- Demo money-shot: same agent, same endpoint — human-backed grants free-trial 200 ×3, 4th call settles real USDC on Arc through the governed treasury.
+- **Seller seam (fully separable — "paid route can run on any EVM chain"; Arc even ships as built-in default RPC in the SDK):** do NOT adopt their resource server. Manual API: `parseAgentkitHeader` → `validateAgentkitMessage` (domain/uri binding, ≤5min, nonce) → `verifyAgentkitSignature` (SIWE recover) → `createAgentBookVerifier().lookupHuman(addr)` (read-only World Chain RPC `https://worldchain-mainnet.g.alchemy.com/public`). In `buildPaywall` (payments/seller.ts) before the X-PAYMENT branch: enforce a per-human authorization allowance per humanId (SQLite usage counter), else fall through to existing 402 → Circle Gateway settlement on Arc UNTOUCHED. x402 v1/v2 package coexistence is a non-issue: `@x402/core@2.15` already installed beside our `x402@1.2.0`; agentkit's use is type-only.
+- 402 body: `declareAgentkitExtension({domain, resourceUri, network:'eip155:5042002', statement})` — must hand-mint `info.nonce` + `issuedAt` (+expirationTime); top-level `extensions` key next to `accepts`. The `agentkit` header must survive the Vercel proxy (same class as the old X-PAYMENT stripping) — hour-1 smoke test.
+- **⚠ FRAMING CORRECTION (prize DQ list):** the live prize page bans "human-backed benefits for AI agents (i.e API calls, discounts)" — do NOT present the mechanism as free trials/perks. Same code, mandatory framing: a per-human **authorization/execution-rights limit** inside the legal-body governance flow ("access, limits, pricing, authorization, execution rights" is their qualifying language). Demo: same agent, same endpoint — unverified agents are refused execution rights; a human-backed, legally-governed agent is authorized and settles real USDC on Arc through the governed treasury.
 
 ### Risks
 1. IDKit v4 beta churn → `allow_legacy_proofs` + legacy presets; vanilla idkit-core QR flow (proven in agentkit-cli source) as fallback.
@@ -88,7 +96,7 @@ Hours: guardian gate 6–9 · agent-side 3–5 · seller-side 4–6.
 - ENSv2 Namechain L2 CANCELLED (Feb 2026) — v1 flat registry + ENSIP-10 wildcard + CCIP-read is the live path; nothing throwaway.
 - Build on **Sepolia** (free): Registry `0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e`, Controller `0xfb3cE5D01e0f33f41DbB39035dB9745962F1f968`, NameWrapper `0x0635513f179D50A207757E05759CbD106d7dFcE8`, **UniversalResolver `0xeEeEeEeE14D718C2B47D9923Deab1335E144EeEe`** (in viem's sepolia chain object already). Manager app: sepolia.app.ens.domains.
 - Optional mainnet `novicorpus.eth`: $5/yr + ~$3–8 gas, ~15 min (commit ≥60s → register) — buys Rainbow/Etherscan resolution at the booth. Same script/contract/gateway.
-- Register via ensjs 4.3.1 script (`commitName`/`registerName` + `addEnsContracts(sepolia)`) — NOT the alpha app (know your wrapped-name path). Names register WRAPPED → `setResolver` via NameWrapper (`contract:'nameWrapper'`). Keep registration + resolver-setting on ONE key.
+- Register via ensjs 4.3.1 script (`commitName`/`registerName` + `addEnsContracts(sepolia)`) — NOT the alpha app. **CORRECTED: names register UNWRAPPED with the current (2025) controller** — `setResolver` uses `contract: 'registry'`, NOT NameWrapper; there is no `fuses`/`ownerControlledFuses` param anymore (`reverseRecord` is now a uint8 enum; new `referrer` param exists). Keep registration + resolver-setting on ONE key. Commitments expire after 24h — commit and register in one sitting.
 
 ### Architecture
 - ONE `OffchainResolver.sol` (copy verbatim from ensdomains/offchain-resolver, ~60 lines + SignatureVerifier) deployed on Sepolia via our Foundry; constructor = gateway URL + signer allowlist. ENSIP-10 `resolve(bytes dnsName, bytes innerCall)` reverts `OffchainLookup` → serves `*.novicorpus.eth` with ZERO per-agent txs.

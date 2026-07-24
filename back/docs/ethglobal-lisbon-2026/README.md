@@ -8,7 +8,13 @@
 | File | Audience | Content |
 |---|---|---|
 | [concepts.md](./concepts.md) | Everyone (pitch, judges, teammates) | What each integration is and why, explained conceptually |
-| [technical-blueprints.md](./technical-blueprints.md) | Builders | Implementation-grade blueprints: exact packages, addresses, encodings, code seams, hour estimates, risks |
+| [technical-blueprints.md](./technical-blueprints.md) | Builders | Cross-stack summary blueprints: packages, addresses, encodings, code seams, hour estimates, risks |
+| [reference-thegraph.md](./reference-thegraph.md) | Builders (authoritative) | Complete offline build reference: manifest+schema drafts, AssemblyScript traps, Studio/self-hosted flows, x402 v2 leg, MCP/SKILL skeletons |
+| [reference-world.md](./reference-world.md) | Builders (authoritative) | Complete offline build reference: IDKit v4 + verify API, AgentKit full API, seller seam, no-SDK fallback, track rules verbatim |
+| [reference-ens.md](./reference-ens.md) | Builders (authoritative) | Complete offline build reference: resolver sources verbatim, ensjs flows, CCIP wire protocol, records catalog, test matrix |
+
+Where a reference doc and the blueprint disagree, **the reference doc wins** (each has a
+deltas section; known corrections are already patched into the blueprint).
 
 ## Continuity Track rules (compliance checklist)
 
@@ -65,13 +71,13 @@ Total 41–60h → all three is aggressive solo, comfortable for two people.
 
 ## Pre-hackathon checklist (night 0)
 
-1. **Orb:** get one team member Orb-verified (venue/Lisbon Orb), then `npx @worldcoin/agentkit-cli register <operatorEOA>` (2 min, gasless, permanent — mainnet AgentBook).
+1. **Orb (2 Orbs confirmed at the venue):** get one team member Orb-verified, then `npx @worldcoin/agentkit-cli register <operatorEOA>` (2 min, gasless, permanent — mainnet AgentBook). **⚠ R1: the published CLI uses the v3 identity bridge; World IDs created after 2026-06-01 are v4-only — a freshly-verified account may FAIL AgentBook registration. Prefer someone with a pre-June-2026 World ID, or test the CLI registration immediately after Orb verification tonight** (while there's still time to find another verified person).
 2. **World Developer Portal:** create production + staging apps, action `guardian-verification`; capture `app_id`, `rp_id`, `signing_key`.
 3. **Graph Studio:** wallet sign-in, create subgraph `novi-corpus-arc`, grab deploy key; deploy a factory-only walking skeleton ASAP to de-risk arc-testnet sync.
 4. **Arc registry check (10 min):** `cast call 0x8004A818BFB912233c491871b3d84c89A494BD9e "getMetadata(uint256,string)(bytes)" 845775 "ens"` + a `setMetadata` gas estimate from the manager EOA (decides on-chain vs off-chain ENSIP-25 bidirectionality).
 5. **Sepolia:** faucet ETH; register `novicorpus.eth` via the ensjs script (not the alpha app).
 6. **Circle faucet:** Base Sepolia USDC for the Graph x402 payer key (1 USDC ≈ 100 queries).
-7. **Booth questions:** continuity-team eligibility for main tracks (World's page is silent); does subgraph + x402 gateway count as "≥2 Graph products" for the Composable track?
+7. **Booth questions:** ~~continuity eligibility~~ CONFIRMED — The Graph and World both accept continuity teams in their main tracks. Still ask: does subgraph + x402 gateway count as "≥2 Graph products" for the Composable track? And at World's 4:30 PM workshop: access to the two continuity-only beta prizes ($1,750 each, Selfie/Identity Check — partner-gated, require user+developer feedback documentation).
 8. Commit incrementally from the first hour.
 
 ## Branch & submission strategy
