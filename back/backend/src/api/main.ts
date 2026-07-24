@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
+import { privateKeyToAccount } from "viem/accounts";
 import { ArcAdapter } from "../adapters/arc/arcAdapter";
 import { managerAccount, managerWalletClient, publicClientFor } from "../adapters/arc/clients";
 import { buildTurnkeyProvisionDeps } from "../adapters/turnkey/clients";
@@ -113,6 +114,16 @@ async function main() {
   if (x402Demo)
     console.warn(`⚠ x402 demo seller ENABLED at /x402-demo/quote (payTo ${x402Demo.payTo})`);
 
+  const ens = cfg.ens
+    ? {
+        signer: privateKeyToAccount(cfg.ens.signerKey),
+        parentName: cfg.ens.parentName,
+        metadataBaseUrl: cfg.metadataBaseUrl,
+        resolverAddress: cfg.ens.resolverAddress,
+      }
+    : undefined;
+  if (ens) console.warn(`⚠ ENS gateway ENABLED at /ensgateway (parent ${ens.parentName})`);
+
   const app = buildApiApp({
     webOrigin: cfg.webOrigin,
     nonceStore,
@@ -141,6 +152,7 @@ async function main() {
     payments,
     pocketFunding,
     x402Demo,
+    ens,
   });
 
   const port = Number(process.env.PORT ?? 8789);

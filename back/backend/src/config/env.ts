@@ -90,6 +90,10 @@ const EnvSchema = z.object({
       },
       { message: "must be > 0 and <= 1.0 USDC (max 6 decimals)" },
     ),
+  // ENS CCIP-Read gateway (optional; absent -> route not mounted). Signs record responses.
+  ENS_GATEWAY_SIGNER_KEY: privKeySchema.optional(),
+  ENS_PARENT_NAME: z.string().default("novicorpus.eth"),
+  ENS_RESOLVER_ADDRESS: addressSchema.optional(),
 });
 
 export interface Config {
@@ -140,6 +144,11 @@ export interface Config {
   enableX402Demo: boolean;
   x402DemoPayTo: Address;
   x402DemoPriceUsdc: string;
+  ens?: {
+    signerKey: Hex;
+    parentName: string;
+    resolverAddress?: Address;
+  };
 }
 
 /** Validate + shape env into Config. Throws a readable error on the first invalid field. */
@@ -209,6 +218,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     x402DemoPayTo:
       e.X402_DEMO_PAYTO ?? (privateKeyToAccount(e.PLATFORM_PRIVATE_KEY).address as Address),
     x402DemoPriceUsdc: e.X402_DEMO_PRICE_USDC,
+    ens: e.ENS_GATEWAY_SIGNER_KEY
+      ? {
+          signerKey: e.ENS_GATEWAY_SIGNER_KEY,
+          parentName: e.ENS_PARENT_NAME,
+          resolverAddress: e.ENS_RESOLVER_ADDRESS,
+        }
+      : undefined,
   };
 
   // Fail-closed: never let production boot with the insecure dev defaults.
@@ -258,6 +274,7 @@ export function redact(cfg: Config): Record<string, unknown> {
     anthropicApiKey: cfg.anthropicApiKey ? "REDACTED" : undefined,
     jobClientPrivateKey: "REDACTED",
     jobEvaluatorPrivateKey: cfg.jobEvaluatorPrivateKey ? "REDACTED" : undefined,
+    ens: cfg.ens ? { ...cfg.ens, signerKey: "REDACTED" } : undefined,
     turnkey: cfg.turnkey
       ? {
           ...cfg.turnkey,

@@ -7,6 +7,7 @@ import { apiOnError } from "./errors";
 import { mountApiKeyRoutes } from "./routes/apiKeys";
 import { mountAuthRoutes } from "./routes/auth";
 import { mountConnectionRoutes } from "./routes/connection";
+import { mountEnsGatewayRoutes } from "./routes/ensGateway";
 import { mountJobRoutes } from "./routes/jobs";
 import { mountMetadataRoutes } from "./routes/metadata";
 import { mountProtectedRoutes } from "./routes/onboard";
@@ -63,6 +64,9 @@ export interface ApiDeps {
   /** Optional flag-gated x402 demo seller (Leg 3 smoke target). Present only when
    *  ENABLE_X402_DEMO is set; absent -> route not mounted (404). */
   x402Demo?: import("./routes/x402Demo").X402DemoDeps;
+  /** Optional ENS CCIP-Read gateway (serves `*.<parent>.eth` records). Present only when
+   *  ENS_GATEWAY_SIGNER_KEY is set; absent -> route not mounted (404). */
+  ens?: import("./routes/ensGateway").EnsGatewayDeps;
 }
 
 /** Build the wizard REST API app: CORS + error envelope + /healthz. Routes mounted by later tasks. */
@@ -71,7 +75,10 @@ export function buildApiApp(deps: ApiDeps) {
   app.use(
     "*",
     cors({
-      origin: (_origin, c) => (c.req.path.startsWith("/metadata/") ? "*" : deps.webOrigin),
+      origin: (_origin, c) =>
+        c.req.path.startsWith("/metadata/") || c.req.path.startsWith("/ensgateway")
+          ? "*"
+          : deps.webOrigin,
       allowHeaders: ["authorization", "content-type"],
     }),
   );
@@ -79,6 +86,7 @@ export function buildApiApp(deps: ApiDeps) {
   app.get("/healthz", (c) => c.json({ ok: true }));
   mountSchemaRoutes(app);
   mountMetadataRoutes(app, deps);
+  mountEnsGatewayRoutes(app, deps);
   if (deps.x402Demo) mountX402DemoRoutes(app, deps.x402Demo);
   mountAuthRoutes(app, deps);
   mountPasskeyRoutes(app, deps);
