@@ -20,6 +20,23 @@ export function mountMetadataRoutes(app: Hono<{ Variables: AuthVars }>, deps: Ap
     } catch {
       throw new ApiError("not_found", 404, "metadata not found");
     }
+    // ENSIP-25 off-chain half: advertise the ENS name + registry binding so a verifier can obtain
+    // the claimed name from the registry's metadata (the on-chain half is setMetadata(id,"ens",...)).
+    if (deps.ens && ent.agentId) {
+      try {
+        const meta = JSON.parse(body);
+        meta.ens = `${publicId}.${deps.ens.parentName}`;
+        meta.registrations = [
+          {
+            agentId: ent.agentId,
+            agentRegistry: `eip155:${deps.ens.chainId}:${deps.ens.identityRegistry}`,
+          },
+        ];
+        body = JSON.stringify(meta);
+      } catch {
+        // Non-JSON stored body: serve as-is rather than 500.
+      }
+    }
     c.header("Content-Type", "application/json");
     c.header("Cache-Control", "public, max-age=300");
     c.header("X-Content-Type-Options", "nosniff");
