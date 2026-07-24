@@ -35,8 +35,20 @@ export interface EnsGatewayDeps {
   parentName: string;
   /** Base URL for the agent metadata JSON (the `url`/`metadata` records). */
   metadataBaseUrl: string;
+  /** ERC-8004 identity registry address (for the ENSIP-25 agent-registration key). */
+  identityRegistry: Address;
+  /** Chain id of the registry (Arc testnet 5042002) — for ERC-7930 encoding. */
+  chainId: number;
   /** Deployed OffchainResolver address (informational; the URL `:sender` is authoritative). */
   resolverAddress?: Address;
+}
+
+/** ERC-7930 interoperable address for an EVM registry: version‖chainType(eip155)‖refLen‖chainRef‖addrLen‖addr. */
+function erc7930(chainId: number, address: Address): string {
+  let ref = chainId.toString(16);
+  if (ref.length % 2) ref = `0${ref}`;
+  const refLen = (ref.length / 2).toString(16).padStart(2, "0");
+  return `0x0001${"0000"}${refLen}${ref}14${address.slice(2).toLowerCase()}`;
 }
 
 /** DNS wire format -> ["sub","novicorpus","eth"]. Returns null on malformed input. */
@@ -75,8 +87,51 @@ function addrFor(deps: ApiDeps, target: Target): Address {
   return zeroAddress;
 }
 
-/** Text records (repo-sourced). T4 adds live legal-status (Arc), ENSIP-25, ENSIP-26 agent-context. */
-function textFor(deps: ApiDeps, target: Target, key: string): string {
+type EntityLike = {
+  name: string;
+  treasury: string | null;
+  operator: string | null;
+  proxy: string | null;
+  agentId: string | null;
+};
+
+/** Live legal standing: "Active" iff LegalManager status==0 AND treasury not paused; else "Suspended". */
+async function legalStatusText(deps: ApiDeps, ent: EntityLike): Promise<string> {
+  const proxy = ent.proxy as Address | null;
+  const treasury = ent.treasury as Address | null;
+  if (!proxy && !treasury) return "";
+  try {
+    const [status, paused] = await Promise.all([
+      proxy ? deps.arc.legalStatus(proxy) : Promise.resolve(0),
+      treasury ? deps.arc.treasuryPaused(treasury) : Promise.resolve(false),
+    ]);
+    return status === 0 && !paused ? "Active" : "Suspended";
+  } catch {
+    return ""; // never break resolution on a transient Arc RPC error
+  }
+}
+
+/** ENSIP-26 agent-context: a short human/agent-readable card pointing at the verification records. */
+function agentContext(deps: ApiDeps, ent: EntityLike, metaUrl: string): string {
+  const ens = deps.ens!;
+  const registry = `eip155:${ens.chainId}:${ens.identityRegistry}`;
+  return [
+    `# ${ent.name}`,
+    "",
+    "A Wyoming DAO LLC-governed AI agent operated under Novi Corpus.",
+    "",
+    `- Treasury: ${ent.treasury ?? "(pending)"}`,
+    `- Legal identity: ERC-8004 agent ${ent.agentId ?? "?"} on ${registry}`,
+    `- Metadata: ${metaUrl}`,
+    `- MCP endpoint: ${deps.mcpPublicUrl}`,
+    "",
+    "Verify: resolve the agent-registration[<registry>][<agentId>] record on this name,",
+    'then cross-check getMetadata(agentId,"ens") on the registry (bidirectional, ENSIP-25).',
+  ].join("\n");
+}
+
+/** Text records: repo-sourced + live legal-status (Arc), ENSIP-25 agent-registration, ENSIP-26 agent-context. */
+async function textFor(deps: ApiDeps, target: Target, key: string): Promise<string> {
   const ens = deps.ens!;
   if (target.kind === "apex") {
     if (key === "description") return "Novi Corpus — legal bodies for AI agents";
@@ -84,33 +139,43 @@ function textFor(deps: ApiDeps, target: Target, key: string): string {
     if (key === "agent-endpoint[web]") return deps.webOrigin;
     return "";
   }
-  if (target.kind === "agent") {
-    const ent = deps.repo.findByPublicId(target.label);
-    if (!ent) return "";
-    const metaUrl = `${ens.metadataBaseUrl}/metadata/${target.label}`;
-    switch (key) {
-      case "description":
-        return `${ent.name} — Wyoming DAO LLC governed agent`;
-      case "url":
-      case "metadata":
-        return metaUrl;
-      case "treasury":
-        return ent.treasury ?? "";
-      case "operator":
-        return ent.operator ?? "";
-      case "agent-endpoint[mcp]":
-        return deps.mcpPublicUrl;
-      case "agent-endpoint[web]":
-        return deps.webOrigin;
-      default:
-        return ""; // T4: legal-status, agent-registration[...], agent-context
-    }
+  if (target.kind !== "agent") return "";
+  const ent = deps.repo.findByPublicId(target.label);
+  if (!ent) return "";
+  const metaUrl = `${ens.metadataBaseUrl}/metadata/${target.label}`;
+
+  // ENSIP-25: agent-registration[<erc7930 registry>][<agentId>] -> "1" iff it names THIS entity.
+  const m = key.match(/^agent-registration\[(0x[0-9a-fA-F]+)\]\[([^[\]]+)\]$/);
+  if (m) {
+    const ours = erc7930(ens.chainId, ens.identityRegistry).toLowerCase();
+    return m[1]?.toLowerCase() === ours && ent.agentId && m[2] === ent.agentId ? "1" : "";
   }
-  return "";
+
+  switch (key) {
+    case "description":
+      return `${ent.name} — Wyoming DAO LLC governed agent`;
+    case "url":
+    case "metadata":
+      return metaUrl;
+    case "treasury":
+      return ent.treasury ?? "";
+    case "operator":
+      return ent.operator ?? "";
+    case "agent-endpoint[mcp]":
+      return deps.mcpPublicUrl;
+    case "agent-endpoint[web]":
+      return deps.webOrigin;
+    case "legal-status":
+      return legalStatusText(deps, ent);
+    case "agent-context":
+      return agentContext(deps, ent, metaUrl);
+    default:
+      return "";
+  }
 }
 
 /** Dispatch the inner resolver call to an ABI-encoded `result` (never throws for unknown records). */
-function resolveInner(deps: ApiDeps, innerCall: Hex, target: Target): Hex {
+async function resolveInner(deps: ApiDeps, innerCall: Hex, target: Target): Promise<Hex> {
   const sel = innerCall.slice(0, 10).toLowerCase();
   if (sel === SEL_ADDR) {
     return encodeAbiParameters([{ type: "address" }], [addrFor(deps, target)]);
@@ -132,7 +197,7 @@ function resolveInner(deps: ApiDeps, innerCall: Hex, target: Target): Hex {
       [{ type: "bytes32" }, { type: "string" }],
       `0x${innerCall.slice(10)}` as Hex,
     ) as [Hex, string];
-    return encodeAbiParameters([{ type: "string" }], [textFor(deps, target, key)]);
+    return encodeAbiParameters([{ type: "string" }], [await textFor(deps, target, key)]);
   }
   return encodeAbiParameters([{ type: "bytes" }], ["0x"]); // unknown record fn -> empty
 }
@@ -166,7 +231,7 @@ export async function answer(
   const parentLabels = ens.parentName.split(".");
   const target: Target = labels ? classify(labels, parentLabels) : { kind: "unknown" };
 
-  const result = resolveInner(deps, innerCall, target);
+  const result = await resolveInner(deps, innerCall, target);
 
   // Sign per SignatureVerifier: keccak256(0x1900 ‖ resolver ‖ expires ‖ keccak(request) ‖ keccak(result)).
   // `request` is the FULL outer resolve() calldata (what the resolver put in extraData). Verified

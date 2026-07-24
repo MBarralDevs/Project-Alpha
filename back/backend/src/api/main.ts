@@ -119,6 +119,8 @@ async function main() {
         signer: privateKeyToAccount(cfg.ens.signerKey),
         parentName: cfg.ens.parentName,
         metadataBaseUrl: cfg.metadataBaseUrl,
+        identityRegistry: cfg.identityRegistry,
+        chainId: cfg.chainId,
         resolverAddress: cfg.ens.resolverAddress,
       }
     : undefined;

@@ -29,18 +29,30 @@ const client = createPublicClient({ chain: sepolia, transport: http(process.env.
 
 // Mock entity: publicId "testagent", a real-looking treasury address.
 const TREASURY = "0x8ffA18f05056458dbFB2f7A122F185878B2d6e2f" as Address;
+const REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e" as Address;
 const deps = {
   ens: {
     signer,
     parentName: "novicorpus.eth",
     metadataBaseUrl: "https://project-alpha-pi.vercel.app/backend",
+    identityRegistry: REGISTRY,
+    chainId: 5042002,
   },
   repo: {
     findByPublicId: (id: string) =>
       id === "testagent"
-        ? { name: "TestAgent MB1", treasury: TREASURY, operator: TREASURY, publicId: "testagent" }
+        ? {
+            name: "TestAgent MB1",
+            treasury: TREASURY,
+            operator: TREASURY,
+            proxy: TREASURY,
+            agentId: "845775",
+            publicId: "testagent",
+          }
         : undefined,
   },
+  // Mock Arc reads: Active (status 0) and not paused. Flip these to see "Suspended".
+  arc: { legalStatus: async () => 0, treasuryPaused: async () => false },
   platformManagerAddress: "0x8ffA18f05056458dbFB2f7A122F185878B2d6e2f",
   mcpPublicUrl: "https://project-alpha-pi.vercel.app/backend/mcp",
   webOrigin: "https://project-alpha-pi.vercel.app",
@@ -144,6 +156,39 @@ async function main() {
     }),
     (r) =>
       `unknown-label url = "${decodeAbiParameters([{ type: "string" }], r)[0]}" (expected empty)`,
+  );
+
+  // T4: live legal-status (Arc) + ENSIP-25 + ENSIP-26 records.
+  const erc7930Key = "0x00010000034cef52148004a818bfb912233c491871b3d84c89a494bd9e";
+  await check(
+    "testagent.novicorpus.eth",
+    encodeFunctionData({ abi: textAbi, functionName: "text", args: [node, "legal-status"] }),
+    (r) => `legal-status = "${decodeAbiParameters([{ type: "string" }], r)[0]}" (mock Active)`,
+  );
+  await check(
+    "testagent.novicorpus.eth",
+    encodeFunctionData({
+      abi: textAbi,
+      functionName: "text",
+      args: [node, `agent-registration[${erc7930Key}][845775]`],
+    }),
+    (r) => `ENSIP-25 match = "${decodeAbiParameters([{ type: "string" }], r)[0]}" (expected "1")`,
+  );
+  await check(
+    "testagent.novicorpus.eth",
+    encodeFunctionData({
+      abi: textAbi,
+      functionName: "text",
+      args: [node, `agent-registration[${erc7930Key}][999999]`],
+    }),
+    (r) =>
+      `ENSIP-25 wrong-id = "${decodeAbiParameters([{ type: "string" }], r)[0]}" (expected empty)`,
+  );
+  await check(
+    "testagent.novicorpus.eth",
+    encodeFunctionData({ abi: textAbi, functionName: "text", args: [node, "agent-context"] }),
+    (r) =>
+      `agent-context (${(decodeAbiParameters([{ type: "string" }], r)[0] as string).length} chars)`,
   );
 
   console.log(
