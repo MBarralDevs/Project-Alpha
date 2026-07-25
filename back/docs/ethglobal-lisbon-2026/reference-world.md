@@ -568,11 +568,19 @@ export function mintAgentkitExtension(cfg: { domain: string; resourceUrl: string
     mode: { type: "free-trial", uses: 3 },    // advertised to clients; enforcement is ours
   });
   const a = ext.agentkit;
-  // ⚠ FIELD-CORRECTION (2026-07-25, hit in W4/W5): the nonce MUST be ALPHANUMERIC. randomUUID()
-  // (shown below and in World's own example) contains hyphens, so the client's createHeader throws
-  // SiweError "Nonce size smaller then 8 characters or is not alphanumeric" — which agentkitFetch
-  // SWALLOWS as `agentkit_skipped`, i.e. the agent silently never gets authorized and no error
-  // surfaces anywhere. Use randomBytes(16).toString("hex") instead.
+  // ⚠ CORRECTION (2026-07-25) — THIS DOC'S EARLIER SAMPLE WAS WRONG, NOT THE SDK.
+  // An earlier revision of this file suggested `randomUUID()` here. That is a BUG IN THIS DOC:
+  // the nonce feeds an EIP-4361 (SIWE) message, and SIWE requires an ALPHANUMERIC nonce, so a
+  // UUID's hyphens make the client's createHeader throw SiweError "Nonce size smaller then 8
+  // characters or is not alphanumeric" — which agentkitFetch catches and reports as
+  // `agentkit_skipped` (observable via onEvent, but invisible if you don't subscribe): the agent
+  // silently never gets authorized.
+  // VERIFIED: World's own `agentkitResourceServerExtension` uses exactly the line below
+  // (`randomBytes(16).toString("hex")`), i.e. the SDK does this correctly — we only hit it because
+  // we hand-mint the extension (our seller is x402 v1 + Circle batching, so their v2 resource
+  // server is not usable). World's docs do not show nonce generation at all; the only fair
+  // feedback for them is that the "Manual Usage (Advanced)" path doesn't state the SIWE
+  // alphanumeric constraint. NOT an SDK bug — do not report it as one.
   a.info.nonce = randomBytes(16).toString("hex");   // NOT randomUUID()
   a.info.issuedAt = new Date().toISOString();
   a.info.expirationTime = new Date(Date.now() + 5 * 60_000).toISOString();
