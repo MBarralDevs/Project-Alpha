@@ -14,6 +14,7 @@ import type {
   PasskeyView,
   ReputationView,
   TreasuryView,
+  WorldIdContext,
   WorldIdMe,
   WorldIdRequestView,
   WorldIdStatusView,
@@ -46,7 +47,11 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
     const err =
       json && typeof json === "object" && "error" in json
         ? (json as ApiErrorBody).error
-        : { code: "http_error", message: res.statusText };
+        : {
+            code: "http_error",
+            // statusText is often empty (HTTP/2, bare 500s) — never surface a blank error.
+            message: res.statusText || `Request failed (HTTP ${res.status})`,
+          };
     throw new ApiError(res.status, err);
   }
 
@@ -237,4 +242,14 @@ export function worldIdRequest(token: string): Promise<WorldIdRequestView> {
 /** Poll a verification request until it resolves. */
 export function worldIdStatus(token: string, requestId: string): Promise<WorldIdStatusView> {
   return request<WorldIdStatusView>(`/world-id/status/${requestId}`, { token });
+}
+
+/** Params for the browser IDKit widget, including the v4-mandatory signed request context. */
+export function worldIdContext(token: string): Promise<WorldIdContext> {
+  return request<WorldIdContext>("/world-id/context", { token });
+}
+
+/** Submit a proof produced by the browser widget for verification + binding. */
+export function worldIdVerify(token: string, proof: unknown): Promise<WorldIdStatusView> {
+  return request<WorldIdStatusView>("/world-id/verify", { token, body: { proof } });
 }

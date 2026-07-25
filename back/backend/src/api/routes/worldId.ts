@@ -3,6 +3,7 @@ import type { Hono } from "hono";
 import {
   type WorldIdConfig,
   WorldIdError,
+  makeRpContext,
   startGuardianVerification,
   verifyProof,
 } from "../../adapters/worldid/guardianGate";
@@ -128,6 +129,69 @@ export function mountWorldIdRoutes(app: Hono<{ Variables: AuthVars }>, deps: Api
       world.store.updateRequest(requestId, "failed", detail);
       throw new ApiError("verification_failed", 400, detail);
     }
+  });
+
+  // ── Browser flow ────────────────────────────────────────────────────────────────────────────
+  // IDKit is designed to run client-side: the browser creates the request and produces the proof,
+  // and the server only verifies it. Verification is a plain HTTPS call to World — no WASM — which
+  // also keeps the web path free of the Node/WASM constraints of the headless (MCP) flow above.
+
+  /** Everything the browser widget needs, including the v4-mandatory signed request context. */
+  app.get("/world-id/context", requireAuth(deps.jwtSecret), (c) => {
+    const tenantId = c.get("tenantId");
+    return c.json({
+      appId: world.cfg.appId,
+      action: world.cfg.action,
+      environment: world.cfg.environment,
+      // The guardian's wallet is bound into the proof, so it can't be replayed for another account.
+      signal: tenantId,
+      rpContext: makeRpContext(world.cfg),
+    });
+  });
+
+  /** Verify a proof produced by the browser widget, then apply our sybil gate + cap. */
+  app.post("/world-id/verify", requireAuth(deps.jwtSecret), async (c) => {
+    const tenantId = c.get("tenantId");
+    let body: { proof?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new ApiError("validation_error", 400, "invalid JSON body");
+    }
+    if (!body.proof) throw new ApiError("validation_error", 400, "proof is required");
+
+    let proof: Awaited<ReturnType<typeof verifyProof>>;
+    try {
+      proof = await verifyProof(world.cfg, body.proof);
+    } catch (e) {
+      const detail = e instanceof WorldIdError ? `${e.code}: ${e.message}` : String(e);
+      throw new ApiError("verification_failed", 400, detail);
+    }
+
+    const existing = world.store.findByNullifier(proof.nullifier, world.cfg.action);
+    if (existing && existing.tenantId !== tenantId)
+      throw new ApiError(
+        "human_already_bound",
+        409,
+        "this human is already the guardian of another account",
+      );
+
+    world.store.recordVerification({
+      nullifier: proof.nullifier,
+      action: world.cfg.action,
+      tenantId,
+      issuerSchemaId: proof.issuerSchemaId,
+      credential: proof.credential,
+      environment: proof.environment,
+      verifiedAt: Date.now(),
+      expiresAtMin: proof.expiresAtMin,
+    });
+    return c.json({
+      status: "verified",
+      credential: proof.credential,
+      entitiesUsed: world.store.countEntitiesForNullifier(proof.nullifier, world.cfg.action),
+      maxEntities: world.maxEntitiesPerHuman,
+    });
   });
 
   // Current guardian-verification state for the caller's tenant (drives UI + the onboarding gate).

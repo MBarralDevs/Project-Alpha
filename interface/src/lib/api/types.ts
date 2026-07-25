@@ -189,6 +189,14 @@ export type WorldIdMe = {
   maxEntities?: number;
 };
 
+export type WorldIdContext = {
+  appId: string;
+  action: string;
+  environment: "production" | "staging" | "sandbox";
+  signal: string;
+  rpContext: Record<string, unknown>;
+};
+
 export type WorldIdRequestView = {
   requestId: string;
   connectorURI: string;
