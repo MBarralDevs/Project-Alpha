@@ -206,8 +206,8 @@ async function main() {
 
   // ── Verdict ────────────────────────────────────────────────────────────────────────────────
   rule("VERDICT");
-  line(`  ✓ Human-backed      — a unique verified human is accountable (World)`);
-  line(`  ✓ Legally governed  — Wyoming DAO LLC, on-chain treasury, authorization limits (Novi)`);
+  line("  ✓ Human-backed      — a unique verified human is accountable (World)");
+  line("  ✓ Legally governed  — Wyoming DAO LLC, on-chain treasury, authorization limits (Novi)");
   line(`  ✓ Name-verified     — ${ENS_NAME} <-> ERC-8004 #${AGENT_ID}, both directions (ENS)`);
   line();
   line("  Identity, accountability, behaviour — the three questions you'd ask about any");

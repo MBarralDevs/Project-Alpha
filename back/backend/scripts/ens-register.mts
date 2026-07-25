@@ -1,3 +1,7 @@
+import { addEnsContracts } from "@ensdomains/ensjs";
+import { getOwner, getPrice } from "@ensdomains/ensjs/public";
+import { randomSecret } from "@ensdomains/ensjs/utils";
+import { commitName, registerName } from "@ensdomains/ensjs/wallet";
 /**
  * ENS name registration (Sepolia) — hackathon build 1 (ENS), task T1.
  *
@@ -29,13 +33,9 @@
  * registers in one sitting. If it fails after committing, just re-run it
  * (a fresh commit/secret is generated each run).
  */
-import { createPublicClient, createWalletClient, http, formatEther } from "viem";
+import { http, createPublicClient, createWalletClient, formatEther } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
-import { addEnsContracts } from "@ensdomains/ensjs";
-import { getPrice, getOwner } from "@ensdomains/ensjs/public";
-import { randomSecret } from "@ensdomains/ensjs/utils";
-import { commitName, registerName } from "@ensdomains/ensjs/wallet";
 
 const RPC = process.env.SEPOLIA_RPC_URL;
 const KEY = process.env.ENS_OWNER_KEY as `0x${string}` | undefined;
@@ -67,13 +67,18 @@ async function main() {
     fail(`This address has no Sepolia ETH. Fund ${account.address} via a Sepolia faucet first.`);
 
   const existingOwner = await getOwner(client, { name: NAME }).catch(() => null);
-  if (existingOwner?.owner && existingOwner.owner !== "0x0000000000000000000000000000000000000000") {
+  if (
+    existingOwner?.owner &&
+    existingOwner.owner !== "0x0000000000000000000000000000000000000000"
+  ) {
     if (existingOwner.owner.toLowerCase() === account.address.toLowerCase()) {
       console.log(`\n✓ ${NAME} is ALREADY owned by this address — nothing to do.`);
       console.log(`  ownershipLevel: ${existingOwner.ownershipLevel}`);
       return;
     }
-    fail(`${NAME} is already registered to ${existingOwner.owner} (not us). Pick another parent name.`);
+    fail(
+      `${NAME} is already registered to ${existingOwner.owner} (not us). Pick another parent name.`,
+    );
   }
 
   // Resume mode: if ENS_COMMIT_SECRET is set, reuse the existing on-chain
@@ -84,11 +89,16 @@ async function main() {
 
   const { base, premium } = await getPrice(client, { nameOrNames: NAME, duration: DURATION });
   const value = ((base + premium) * 110n) / 100n; // +10% buffer; controller refunds excess
-  console.log(`Price (1yr):     ${formatEther(base + premium)} ETH  (sending ${formatEther(value)} w/ buffer)`);
-  if (balance < value) fail(`Insufficient balance for registration (need ~${formatEther(value)} ETH).`);
+  console.log(
+    `Price (1yr):     ${formatEther(base + premium)} ETH  (sending ${formatEther(value)} w/ buffer)`,
+  );
+  if (balance < value)
+    fail(`Insufficient balance for registration (need ~${formatEther(value)} ETH).`);
 
   if (resumeSecret) {
-    console.log(`\nRESUME: reusing existing commitment (secret ${secret.slice(0, 10)}…), skipping commit.`);
+    console.log(
+      `\nRESUME: reusing existing commitment (secret ${secret.slice(0, 10)}…), skipping commit.`,
+    );
   } else {
     console.log(`\nSECRET (save to retry register without re-committing): ${secret}`);
     console.log("\n[1/2] Committing...");
@@ -106,7 +116,7 @@ async function main() {
 
   console.log(`\n✓ Registered ${NAME}`);
   console.log(`  View: https://sepolia.app.ens.domains/${NAME}`);
-  console.log(`  Next (T2): deploy the resolver, then run the set-resolver step.`);
+  console.log("  Next (T2): deploy the resolver, then run the set-resolver step.");
 }
 
 main().catch((e) => {
@@ -121,7 +131,11 @@ main().catch((e) => {
     if (cause.data) console.error("  cause.data:", JSON.stringify(cause.data));
     if (cause.signature) console.error("  cause.signature:", cause.signature);
     const c2 = cause.cause;
-    if (c2?.data) console.error("  cause.cause.data:", typeof c2.data === "string" ? c2.data : JSON.stringify(c2.data));
+    if (c2?.data)
+      console.error(
+        "  cause.cause.data:",
+        typeof c2.data === "string" ? c2.data : JSON.stringify(c2.data),
+      );
     if (c2?.reason) console.error("  cause.cause.reason:", c2.reason);
   }
   process.exit(1);

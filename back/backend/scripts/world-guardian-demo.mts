@@ -159,7 +159,7 @@ async function main() {
   if (existing && existing.tenantId !== tenant) {
     line(`  ${R}✗ REFUSED — sybil gate${X}`);
     line(`    this human is already the guardian of ${D}${existing.tenantId}${X}`);
-    line(`    one human cannot quietly back two separate accounts.`);
+    line("    one human cannot quietly back two separate accounts.");
     process.exit(0);
   }
   store.recordVerification({
@@ -185,7 +185,7 @@ async function main() {
   line(`  ${G}✓${X} A real, unique human is now accountable for this account.`);
   line(`  ${G}✓${X} They may form up to ${MAX_ENTITIES} legal entities — no more.`);
   line(`  ${G}✓${X} Every agent under them inherits a named, reachable controller`);
-  line(`      with power to pause, claw back, and dissolve.`);
+  line("      with power to pause, claw back, and dissolve.");
   line();
   line(`  ${D}re-run:  npx tsx --env-file=.env scripts/world-guardian-demo.mts${X}`);
   line(`  ${D}fresh:   RESET=1 npx tsx --env-file=.env scripts/world-guardian-demo.mts${X}`);
