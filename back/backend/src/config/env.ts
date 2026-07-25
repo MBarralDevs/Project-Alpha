@@ -27,6 +27,13 @@ const etherSchema = z.string().refine(
 
 const DEV_JWT_SECRET = "dev-insecure-secret-change-me-please";
 
+/** Fallbacks for `Config.worldChain` (optional in the type for test fixtures). */
+export const WORLD_CHAIN_DEFAULTS = {
+  rpcUrl: "https://worldchain-mainnet.g.alchemy.com/public",
+  agentBook: "0xA23aB2712eA7BBa896930544C7d6636a96b944dA" as Address,
+  allowancePerHuman: 3,
+} as const;
+
 const EnvSchema = z.object({
   ARC_TESTNET_RPC_URL: z.string().url(),
   ARC_CHAIN_ID: z.coerce.number().int().positive().default(5042002),
@@ -94,6 +101,20 @@ const EnvSchema = z.object({
   ENS_GATEWAY_SIGNER_KEY: privKeySchema.optional(),
   ENS_PARENT_NAME: z.string().default("novicorpus.eth"),
   ENS_RESOLVER_ADDRESS: addressSchema.optional(),
+  // World ID / AgentKit (optional; absent -> routes not mounted, seller check skipped).
+  WORLD_APP_ID: z.string().optional(),
+  WORLD_RP_ID: z.string().optional(),
+  WORLD_RP_SIGNING_KEY: z.string().optional(),
+  WORLD_ACTION: z.string().default("guardian-verification"),
+  WORLD_MAX_ENTITIES_PER_HUMAN: z.coerce.number().int().positive().default(3),
+  WORLD_REQUIRE_GUARDIAN: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  WORLD_CHAIN_RPC: z.string().url().default("https://worldchain-mainnet.g.alchemy.com/public"),
+  WORLD_AGENTBOOK_ADDRESS: addressSchema.default("0xA23aB2712eA7BBa896930544C7d6636a96b944dA"),
+  WORLD_ALLOWANCE_PER_HUMAN: z.coerce.number().int().nonnegative().default(3),
+  WORLD_ENVIRONMENT: z.enum(["production", "staging", "sandbox"]).default("production"),
 });
 
 export interface Config {
@@ -148,6 +169,24 @@ export interface Config {
     signerKey: Hex;
     parentName: string;
     resolverAddress?: Address;
+  };
+  /** World ID + AgentKit. Present only when the portal credentials are configured. */
+  world?: {
+    appId: string;
+    rpId: string;
+    rpSigningKey: string;
+    action: string;
+    maxEntitiesPerHuman: number;
+    requireGuardian: boolean;
+    environment: "production" | "staging" | "sandbox";
+  };
+  /** AgentBook read config — independent of `world` so the seller check can run standalone.
+   *  Optional in the type (test fixtures build Config literals); loadConfig always populates it,
+   *  and consumers should fall back to WORLD_CHAIN_DEFAULTS when absent. */
+  worldChain?: {
+    rpcUrl: string;
+    agentBook: Address;
+    allowancePerHuman: number;
   };
 }
 
@@ -225,6 +264,25 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
           resolverAddress: e.ENS_RESOLVER_ADDRESS,
         }
       : undefined,
+    // All three portal credentials are required together — a partial config would fail at
+    // request-signing time with a confusing runtime error instead of a clear boot warning.
+    world:
+      e.WORLD_APP_ID && e.WORLD_RP_ID && e.WORLD_RP_SIGNING_KEY
+        ? {
+            appId: e.WORLD_APP_ID,
+            rpId: e.WORLD_RP_ID,
+            rpSigningKey: e.WORLD_RP_SIGNING_KEY,
+            action: e.WORLD_ACTION,
+            maxEntitiesPerHuman: e.WORLD_MAX_ENTITIES_PER_HUMAN,
+            requireGuardian: e.WORLD_REQUIRE_GUARDIAN,
+            environment: e.WORLD_ENVIRONMENT,
+          }
+        : undefined,
+    worldChain: {
+      rpcUrl: e.WORLD_CHAIN_RPC,
+      agentBook: e.WORLD_AGENTBOOK_ADDRESS,
+      allowancePerHuman: e.WORLD_ALLOWANCE_PER_HUMAN,
+    },
   };
 
   // Fail-closed: never let production boot with the insecure dev defaults.
@@ -275,6 +333,7 @@ export function redact(cfg: Config): Record<string, unknown> {
     jobClientPrivateKey: "REDACTED",
     jobEvaluatorPrivateKey: cfg.jobEvaluatorPrivateKey ? "REDACTED" : undefined,
     ens: cfg.ens ? { ...cfg.ens, signerKey: "REDACTED" } : undefined,
+    world: cfg.world ? { ...cfg.world, rpSigningKey: "REDACTED" } : undefined,
     turnkey: cfg.turnkey
       ? {
           ...cfg.turnkey,
