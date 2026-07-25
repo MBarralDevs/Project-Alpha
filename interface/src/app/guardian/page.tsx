@@ -109,17 +109,7 @@ function GuardianVerification() {
           </div>
         </Card>
 
-        {error ? (
-          <Callout tone="warn" title="Not verified">
-            {error}
-            {error.toLowerCase().includes("already") ? (
-              <span className="mt-1 block text-muted">
-                That human is already the guardian of another account — the sybil gate working as
-                intended. One person cannot quietly back two separate accounts.
-              </span>
-            ) : null}
-          </Callout>
-        ) : null}
+        {error ? <ErrorNote error={error} /> : null}
 
         {me === null ? <LoadingState label="Checking your guardian status…" /> : null}
 
@@ -186,11 +176,58 @@ function GuardianVerification() {
           handleVerify={handleVerify}
           onSuccess={() => {
             setOpen(false);
+            setError(null);
             void refresh();
+          }}
+          onError={(e: unknown) => {
+            const code =
+              typeof e === "string" ? e : ((e as { code?: string })?.code ?? String(e));
+            setOpen(false);
+            setError(`world:${code}`);
           }}
         />
       ) : null}
     </AgentShell>
+  );
+}
+
+/** Turns World/API failures into something a person can act on. */
+function ErrorNote({ error }: { error: string }) {
+  const code = error.startsWith("world:") ? error.slice(6) : "";
+  if (code === "max_verifications_reached")
+    return (
+      <Callout tone="warn" title="World has already verified you for this action">
+        You&apos;re a real, unique human — World just won&apos;t issue a second proof, because this
+        action is capped at one verification per person. Raise{" "}
+        <span className="text-ink">Max verifications per user</span> for the{" "}
+        <span className="text-ink">guardian-verification</span> action in the World Developer
+        Portal, then try again.
+      </Callout>
+    );
+  if (code === "user_rejected" || code === "verification_rejected")
+    return (
+      <Callout tone="warn" title="Verification cancelled">
+        You dismissed the request in World App. Nothing was recorded — start again whenever
+        you&apos;re ready.
+      </Callout>
+    );
+  if (code === "credential_unavailable")
+    return (
+      <Callout tone="warn" title="Orb credential required">
+        Guardianship needs an Orb or document-grade credential — a device-only World ID
+        isn&apos;t enough to be legally accountable for an agent.
+      </Callout>
+    );
+  if (error.toLowerCase().includes("already the guardian"))
+    return (
+      <Callout tone="warn" title="This human already backs another account">
+        The sybil gate working as intended: one person cannot quietly back two separate accounts.
+      </Callout>
+    );
+  return (
+    <Callout tone="warn" title="Not verified">
+      {code || error}
+    </Callout>
   );
 }
 
