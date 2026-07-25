@@ -50,11 +50,53 @@ export interface StartedVerification {
   completion: Promise<{ success: boolean; result?: unknown; error?: unknown }>;
 }
 
+let fetchPatchedForWasm = false;
+
+/**
+ * WORKAROUND — @worldcoin/idkit-core@4.2.2 cannot initialize in plain Node.
+ *
+ * Its WASM loader resolves the bundled `idkit_wasm_bg.wasm` to a `file://` URL and then calls
+ * `fetch()` on it. Browsers and bundlers handle that; Node's fetch does not support the file
+ * scheme, so every request fails with "Failed to initialize IDKit WASM: TypeError: fetch failed".
+ * `initIDKit()` takes no argument and isn't exported, so there is no supported way to hand it
+ * the module.
+ *
+ * We install a narrow shim: `file://` URLs are read from disk and returned as a Response;
+ * every other request is delegated to the original fetch untouched. Installed once, lazily,
+ * and only on the Node path.
+ */
+function ensureNodeWasmFetch(): void {
+  if (fetchPatchedForWasm || typeof globalThis.fetch !== "function") return;
+  const original = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : (input as Request).url;
+    if (url?.startsWith("file://")) {
+      const [{ readFile }, { fileURLToPath }] = await Promise.all([
+        import("node:fs/promises"),
+        import("node:url"),
+      ]);
+      const bytes = await readFile(fileURLToPath(url));
+      return new Response(bytes, {
+        status: 200,
+        headers: { "content-type": "application/wasm" },
+      });
+    }
+    return original(input, init);
+  }) as typeof fetch;
+  fetchPatchedForWasm = true;
+}
+
 /** Open a World ID proof request. `signal` binds the tenant wallet into the proof. */
 export async function startGuardianVerification(
   cfg: WorldIdConfig,
   tenantWallet: string,
 ): Promise<StartedVerification> {
+  ensureNodeWasmFetch();
   const request = await IDKit.request({
     app_id: cfg.appId,
     action: cfg.action,
