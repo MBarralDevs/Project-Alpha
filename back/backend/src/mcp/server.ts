@@ -4,6 +4,7 @@ import { hexToString } from "viem";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { toJobView } from "../api/jobViews";
+import { assertGuardianAllowed } from "../api/routes/worldId";
 import { toEntityView } from "../api/views";
 import type { JobRepository } from "../jobs/jobRepository";
 import type { JobRunner } from "../jobs/jobRunner";
@@ -42,6 +43,8 @@ export interface McpToolDeps {
   arc?: import("../adapters/arc/arcAdapter").ArcAdapter;
   /** ENS config for resolve_agent (parent name + registry for the ENSIP-25 verdict). Optional. */
   ens?: { parentName: string; identityRegistry: string; chainId: number };
+  /** World ID guardian gate (mirrors the REST /onboard gate). Optional. */
+  worldId?: import("../api/routes/worldId").WorldIdDeps;
 }
 
 /** Build a fresh, tenant-scoped MCP server. scope is closed over — never taken from a tool arg. */
@@ -438,6 +441,9 @@ export function buildMcpServer(scope: VerifiedKey, deps: McpToolDeps): McpServer
       if (!passkey)
         return { content: [{ type: "text", text: "passkey handle not found" }], isError: true };
       try {
+        // Mirror of the REST gate: when World enforcement is on, the guardian must be a
+        // World-ID-verified unique human under the per-human entity cap.
+        assertGuardianAllowed(deps.worldId, tenantId);
         const raw = spec as Record<string, unknown>;
         const roles = {
           ...((raw.roles as object) ?? {}),

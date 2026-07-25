@@ -1,0 +1,167 @@
+import { randomUUID } from "node:crypto";
+import type { Hono } from "hono";
+import {
+  type WorldIdConfig,
+  WorldIdError,
+  startGuardianVerification,
+  verifyProof,
+} from "../../adapters/worldid/guardianGate";
+import { type AuthVars, requireAuth } from "../../auth/middleware";
+import type { WorldStore } from "../../persistence/worldStore";
+import type { ApiDeps } from "../app";
+import { ApiError } from "../errors";
+
+export interface WorldIdDeps {
+  cfg: WorldIdConfig;
+  store: WorldStore;
+  maxEntitiesPerHuman: number;
+  requireGuardian: boolean;
+}
+
+const REQUEST_TTL_MS = 10 * 60_000;
+
+/**
+ * Guardian proof-of-personhood gate. Server-driven idkit-core flow so it works for BOTH the web
+ * wizard and MCP-first onboarding (the client only needs to display/scan `connectorURI`).
+ *
+ * POST /world-id/request      -> { requestId, connectorURI }  (authed; binds to the caller's tenant)
+ * GET  /world-id/status/:id   -> { status, verified?, nullifier?, entitiesUsed? }
+ *
+ * The nullifier is the only identity datum stored: stable per (human, rp, action) and unlinkable
+ * across apps, so it proves uniqueness without identifying anyone.
+ */
+export function mountWorldIdRoutes(app: Hono<{ Variables: AuthVars }>, deps: ApiDeps) {
+  const world = deps.worldId;
+  if (!world) return;
+
+  // In-flight bridge polls, keyed by requestId. Kept in-process: a restart just means the client
+  // re-requests (the DB row is the durable record, and verification itself is one-shot).
+  const pending = new Map<
+    string,
+    Promise<{ success: boolean; result?: unknown; error?: unknown }>
+  >();
+
+  app.post("/world-id/request", requireAuth(deps.jwtSecret), async (c) => {
+    const tenantId = c.get("tenantId");
+    const started = await startGuardianVerification(world.cfg, tenantId);
+    const now = Date.now();
+    world.store.createRequest({
+      requestId: started.requestId,
+      tenantId,
+      action: world.cfg.action,
+      createdAt: now,
+      expiresAt: now + REQUEST_TTL_MS,
+    });
+    // Swallow rejections here; /status surfaces them (an unhandled rejection would crash the process).
+    pending.set(
+      started.requestId,
+      started.completion.catch((e) => ({ success: false, error: String(e) })),
+    );
+    return c.json({
+      requestId: started.requestId,
+      connectorURI: started.connectorURI,
+      action: world.cfg.action,
+      environment: world.cfg.environment,
+    });
+  });
+
+  app.get("/world-id/status/:requestId", requireAuth(deps.jwtSecret), async (c) => {
+    const tenantId = c.get("tenantId");
+    const requestId = c.req.param("requestId");
+    const row = world.store.getRequest(requestId);
+    if (!row || row.tenantId !== tenantId)
+      throw new ApiError("not_found", 404, "verification request not found");
+
+    if (row.status === "verified" || row.status === "failed")
+      return c.json({ status: row.status, detail: row.detail });
+
+    const completion = pending.get(requestId);
+    if (!completion) return c.json({ status: "pending", detail: "awaiting World App approval" });
+
+    // Non-blocking peek: resolved -> process; still pending -> tell the client to poll again.
+    const settled = await Promise.race([
+      completion.then((v) => ({ done: true as const, v })),
+      Promise.resolve({ done: false as const, v: undefined }),
+    ]);
+    if (!settled.done) return c.json({ status: "pending" });
+
+    pending.delete(requestId);
+    const outcome = settled.v;
+    if (!outcome?.success) {
+      const detail = String(outcome?.error ?? "verification not completed");
+      world.store.updateRequest(requestId, "failed", detail);
+      return c.json({ status: "failed", detail });
+    }
+
+    try {
+      const proof = await verifyProof(world.cfg, outcome.result);
+      // Sybil gate: this human may already be bound to a DIFFERENT tenant.
+      const stored = world.store.recordVerification({
+        nullifier: proof.nullifier,
+        action: world.cfg.action,
+        tenantId,
+        issuerSchemaId: proof.issuerSchemaId,
+        credential: proof.credential,
+        environment: proof.environment,
+        verifiedAt: Date.now(),
+        expiresAtMin: proof.expiresAtMin,
+      });
+      if (!stored) {
+        world.store.updateRequest(requestId, "failed", "human already bound to another tenant");
+        throw new ApiError(
+          "human_already_bound",
+          409,
+          "this human is already the guardian of another account",
+        );
+      }
+      world.store.updateRequest(requestId, "verified", proof.credential);
+      return c.json({
+        status: "verified",
+        credential: proof.credential,
+        nullifier: proof.nullifier,
+        entitiesUsed: world.store.countEntitiesForNullifier(proof.nullifier, world.cfg.action),
+        maxEntities: world.maxEntitiesPerHuman,
+      });
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      const detail = e instanceof WorldIdError ? `${e.code}: ${e.message}` : String(e);
+      world.store.updateRequest(requestId, "failed", detail);
+      throw new ApiError("verification_failed", 400, detail);
+    }
+  });
+
+  // Current guardian-verification state for the caller's tenant (drives UI + the onboarding gate).
+  app.get("/world-id/me", requireAuth(deps.jwtSecret), (c) => {
+    const tenantId = c.get("tenantId");
+    const v = world.store.findByTenant(tenantId, world.cfg.action);
+    if (!v) return c.json({ verified: false, required: world.requireGuardian });
+    return c.json({
+      verified: true,
+      required: world.requireGuardian,
+      credential: v.credential,
+      verifiedAt: v.verifiedAt,
+      entitiesUsed: world.store.countEntitiesForNullifier(v.nullifier, world.cfg.action),
+      maxEntities: world.maxEntitiesPerHuman,
+    });
+  });
+}
+
+/** Onboarding gate: throws unless the tenant's guardian is a verified unique human under the cap.
+ *  No-op when World isn't configured or enforcement is off — existing deployments are unaffected. */
+export function assertGuardianAllowed(world: WorldIdDeps | undefined, tenantId: string): void {
+  if (!world || !world.requireGuardian) return;
+  const v = world.store.findByTenant(tenantId, world.cfg.action);
+  if (!v)
+    throw new ApiError(
+      "guardian_not_verified",
+      403,
+      "guardian must complete World ID verification before creating a legal entity",
+    );
+  const used = world.store.countEntitiesForNullifier(v.nullifier, world.cfg.action);
+  if (used >= world.maxEntitiesPerHuman)
+    throw new ApiError(
+      "guardian_entity_cap",
+      403,
+      `this human already controls ${used} legal entities (max ${world.maxEntitiesPerHuman})`,
+    );
+}

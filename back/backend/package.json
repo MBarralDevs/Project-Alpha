@@ -30,6 +30,7 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "@turnkey/sdk-server": "^6.1.1",
     "@turnkey/viem": "^0.14.31",
+    "@worldcoin/idkit-core": "^4.2.2",
     "@x402/evm": "^2.15.0",
     "better-sqlite3": "^11.3.0",
     "commander": "^12.1.0",

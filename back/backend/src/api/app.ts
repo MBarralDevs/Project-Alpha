@@ -18,6 +18,7 @@ import { mountReputationRoutes } from "./routes/reputation";
 import { mountRunsRoutes } from "./routes/runs";
 import { mountSchemaRoutes } from "./routes/schema";
 import { mountTreasuryRoutes } from "./routes/treasury";
+import { mountWorldIdRoutes } from "./routes/worldId";
 import { mountX402DemoRoutes } from "./routes/x402Demo";
 
 /** Dependencies for the REST API. Extended by later tasks (auth/onboard routes). */
@@ -67,6 +68,9 @@ export interface ApiDeps {
   /** Optional ENS CCIP-Read gateway (serves `*.<parent>.eth` records). Present only when
    *  ENS_GATEWAY_SIGNER_KEY is set; absent -> route not mounted (404). */
   ens?: import("./routes/ensGateway").EnsGatewayDeps;
+  /** Optional World ID guardian gate (proof-of-personhood). Present only when the WORLD_*
+   *  portal credentials are set; absent -> routes not mounted and onboarding is ungated. */
+  worldId?: import("./routes/worldId").WorldIdDeps;
 }
 
 /** Build the wizard REST API app: CORS + error envelope + /healthz. Routes mounted by later tasks. */
@@ -98,6 +102,7 @@ export function buildApiApp(deps: ApiDeps) {
   app.use("/api-keys/*", requireAuth(deps.jwtSecret));
   app.use("/connection-package", requireAuth(deps.jwtSecret));
   app.use("/bootstrap-connection", requireAuth(deps.jwtSecret));
+  mountWorldIdRoutes(app, deps); // routes carry their own requireAuth (like /passkey)
   mountApiKeyRoutes(app, deps);
   mountConnectionRoutes(app, deps);
   mountProtectedRoutes(app, deps);

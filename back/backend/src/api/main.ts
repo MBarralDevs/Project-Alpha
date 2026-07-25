@@ -22,6 +22,7 @@ import { SqliteEntityRepository } from "../persistence/entityRepository";
 import { SqliteLinkCodeStore } from "../persistence/linkCodeStore";
 import { SqlitePasskeyStore } from "../persistence/passkeyStore";
 import { SqlitePaymentIdempotencyStore } from "../persistence/paymentIdempotencyStore";
+import { SqliteWorldStore } from "../persistence/worldStore";
 import type { Address } from "../types";
 import { runOnboarding } from "../workflow/onboarding";
 import { OnboardingRunner, type RunSaga } from "../workflow/runner";
@@ -127,6 +128,26 @@ async function main() {
     : undefined;
   if (ens) console.warn(`⚠ ENS gateway ENABLED at /ensgateway (parent ${ens.parentName})`);
 
+  const worldStore = new SqliteWorldStore(db);
+  const worldId = cfg.world
+    ? {
+        cfg: {
+          appId: cfg.world.appId,
+          rpId: cfg.world.rpId,
+          rpSigningKey: cfg.world.rpSigningKey,
+          action: cfg.world.action,
+          environment: cfg.world.environment,
+        },
+        store: worldStore,
+        maxEntitiesPerHuman: cfg.world.maxEntitiesPerHuman,
+        requireGuardian: cfg.world.requireGuardian,
+      }
+    : undefined;
+  if (worldId)
+    console.warn(
+      `⚠ World ID guardian gate ENABLED (action ${worldId.cfg.action}, env ${worldId.cfg.environment}, enforce=${worldId.requireGuardian})`,
+    );
+
   const app = buildApiApp({
     webOrigin: cfg.webOrigin,
     nonceStore,
@@ -156,6 +177,7 @@ async function main() {
     pocketFunding,
     x402Demo,
     ens,
+    worldId,
   });
 
   const port = Number(process.env.PORT ?? 8789);

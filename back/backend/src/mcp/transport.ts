@@ -33,6 +33,7 @@ export function mountMcpRoute(app: Hono<{ Variables: AuthVars }>, deps: ApiDeps)
       maxInflightJobsPerTenant: deps.maxInflightJobsPerTenant,
       linkCodes: deps.linkCodes,
       arc: deps.arc,
+      worldId: deps.worldId,
       ens: deps.ens
         ? {
             parentName: deps.ens.parentName,
