@@ -10,6 +10,11 @@ import { arcBatchingConfig } from "../adapters/x402/pocket";
 import { decodeX402Header } from "../adapters/x402/signX402";
 import type { Address } from "../types";
 import type { SettleFn } from "./settle";
+import {
+  type AgentkitSellerConfig,
+  mintAgentkitExtension,
+  verifyAgentkitRequest,
+} from "./worldVerifier";
 
 export interface SellerConfig {
   price: bigint; // atomic USDC the agent charges per query
@@ -98,21 +103,54 @@ export interface PaywallConfig extends SellerConfig {
   resource?: string; // default "/api/insight"
   settle?: SettleFn; // when set, settle the verified payment before serving
   resourceUrl?: string; // the resource URL recorded in the settle payload
+  /** Optional World AgentKit gate: authorize human-backed agents before requiring payment.
+   *  Absent -> the paywall behaves exactly as before. */
+  agentkit?: AgentkitSellerConfig;
 }
 
-/** A paywalled Hono sub-app: 402 -> verify X-PAYMENT -> serve. */
+/** A paywalled Hono sub-app: [agentkit authorization] -> 402 -> verify X-PAYMENT -> serve. */
 export function buildPaywall(cfg: PaywallConfig) {
   const app = new Hono();
   const path = cfg.resource ?? "/api/insight";
   // In-memory/per-process replay guard: tracks seen authorization nonces.
   // A durable SQLite-backed seen-nonce store is the production follow-up.
   const seen = new Set<string>();
+
+  /** 402 body, plus the hand-minted agentkit extension when the World gate is configured.
+   *  `extensions` sits top-level next to `accepts`; the client only reads extensions.agentkit. */
+  const challenge = () =>
+    cfg.agentkit
+      ? { ...buildRequirements(cfg), extensions: mintAgentkitExtension(cfg.agentkit) }
+      : buildRequirements(cfg);
+
   app.get(path, async (c) => {
+    // World gate FIRST: an agent proving it is backed by a verified unique human may be
+    // authorized to act within its per-human allowance. Beyond that (or on any failure) it
+    // falls through to the normal governed-payment path below — fail-closed by construction.
+    const akHeader = c.req.header("agentkit");
+    if (akHeader && cfg.agentkit) {
+      const outcome = await verifyAgentkitRequest(akHeader, cfg.agentkit);
+      if (outcome.authorized) {
+        c.header("X-AGENTKIT-HUMAN", outcome.humanId);
+        c.header("X-AGENTKIT-AUTHORIZATION", `${outcome.used}/${outcome.limit}`);
+        const body = (await cfg.serve(c.req.raw)) as Record<string, unknown>;
+        return c.json(
+          {
+            ...body,
+            humanBacked: true,
+            authorization: { used: outcome.used, limit: outcome.limit },
+          },
+          200,
+        );
+      }
+      c.header("X-AGENTKIT-REASON", outcome.reason);
+    }
+
     const header = c.req.header("X-PAYMENT");
-    if (!header) return c.json(buildRequirements(cfg), 402);
+    if (!header) return c.json(challenge(), 402);
     const v = await verifyPayment(header, cfg);
-    if (!v.ok) return c.json({ ...buildRequirements(cfg), error: v.reason }, 402);
-    if (seen.has(v.nonce)) return c.json({ ...buildRequirements(cfg), error: "replay" }, 402);
+    if (!v.ok) return c.json({ ...challenge(), error: v.reason }, 402);
+    if (seen.has(v.nonce)) return c.json({ ...challenge(), error: "replay" }, 402);
     seen.add(v.nonce);
     if (cfg.settle) {
       const r = await cfg.settle(header, {
@@ -129,8 +167,7 @@ export function buildPaywall(cfg: PaywallConfig) {
         },
         resourceUrl: cfg.resourceUrl ?? cfg.resource ?? "/api/insight",
       });
-      if (!r.ok)
-        return c.json({ ...buildRequirements(cfg), error: `settle-failed:${r.reason ?? ""}` }, 402);
+      if (!r.ok) return c.json({ ...challenge(), error: `settle-failed:${r.reason ?? ""}` }, 402);
       if (r.transferId) c.header("X-PAYMENT-RESPONSE", r.transferId);
     }
     return c.json((await cfg.serve(c.req.raw)) as Record<string, unknown>, 200);

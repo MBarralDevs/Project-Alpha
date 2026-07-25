@@ -113,6 +113,21 @@ async function main() {
   if (resumedJobs) console.log(`Resumed ${resumedJobs} in-flight job(s)`);
 
   const x402Demo = buildX402DemoDeps(cfg);
+  // World gate on the demo seller: authorize human-backed agents (AgentBook on World Chain)
+  // before requiring payment. Settlement stays on Arc, untouched.
+  if (x402Demo && cfg.worldChain) {
+    const host = new URL(x402Demo.resourceUrl).hostname;
+    x402Demo.agentkit = {
+      domain: host,
+      resourceUrl: x402Demo.resourceUrl,
+      network: x402Demo.network,
+      store: new SqliteWorldStore(db),
+      allowancePerHuman: cfg.worldChain.allowancePerHuman,
+      worldChainRpc: cfg.worldChain.rpcUrl,
+      agentBookAddress: cfg.worldChain.agentBook,
+      rpcUrls: { [x402Demo.network]: cfg.rpcUrl },
+    };
+  }
   if (x402Demo)
     console.warn(`⚠ x402 demo seller ENABLED at /x402-demo/quote (payTo ${x402Demo.payTo})`);
 
