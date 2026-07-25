@@ -13,6 +13,8 @@ export interface X402DemoDeps {
   price: bigint; // atomic USDC (6 decimals)
   facilitatorUrl: string; // Circle Gateway facilitator (settle)
   resourceUrl: string; // public URL recorded in the settle payload
+  /** Optional World AgentKit gate (human-backed agent authorization). Absent -> unchanged. */
+  agentkit?: import("../../payments/worldVerifier").AgentkitSellerConfig;
 }
 
 /**
@@ -60,6 +62,7 @@ export function mountX402DemoRoutes(
     network: deps.network,
     resource: "/x402-demo/quote",
     resourceUrl: deps.resourceUrl,
+    agentkit: deps.agentkit,
     settle,
     serve: () => ({ quote: "BYOA x402 demo quote", resource: "/x402-demo/quote" }),
   });

@@ -179,6 +179,42 @@ export type ApiErrorBody = {
   };
 };
 
+/** World ID guardian verification (proof-of-personhood for the legally required human). */
+export type WorldIdMe = {
+  verified: boolean;
+  required: boolean;
+  credential?: string;
+  verifiedAt?: number;
+  /** Per-app pseudonym — the only identity datum stored, and the seed for the guardian seal. */
+  nullifier?: string;
+  entitiesUsed?: number;
+  maxEntities?: number;
+};
+
+export type WorldIdContext = {
+  appId: string;
+  action: string;
+  environment: "production" | "staging" | "sandbox";
+  signal: string;
+  rpContext: Record<string, unknown>;
+};
+
+export type WorldIdRequestView = {
+  requestId: string;
+  connectorURI: string;
+  action: string;
+  environment: string;
+};
+
+export type WorldIdStatusView = {
+  status: "pending" | "verified" | "failed";
+  detail?: string;
+  credential?: string;
+  nullifier?: string;
+  entitiesUsed?: number;
+  maxEntities?: number;
+};
+
 export class ApiError extends Error {
   code: string;
   status: number;

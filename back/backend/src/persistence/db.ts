@@ -182,6 +182,63 @@ export function migrate(db: Database.Database): void {
       created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (idem_key, tenant_id, entity_key)
     );
+
+    -- ── World ID (proof-of-personhood for the legally-required human guardian) ──────────
+    -- One row per (unique human, action). The nullifier is the ONLY identity datum World
+    -- returns: stable per (human, rp, action), different across apps — so it proves
+    -- uniqueness without identifying anyone. UNIQUE(nullifier, action) is the sybil gate:
+    -- a second tenant cannot claim a human who already verified.
+    CREATE TABLE IF NOT EXISTS guardian_verifications (
+      nullifier        TEXT NOT NULL,
+      action           TEXT NOT NULL,
+      tenant_id        TEXT NOT NULL,
+      issuer_schema_id INTEGER,
+      credential       TEXT,
+      environment      TEXT,
+      verified_at      INTEGER NOT NULL,
+      expires_at_min   INTEGER,
+      PRIMARY KEY (nullifier, action)
+    );
+    CREATE INDEX IF NOT EXISTS idx_guardian_verifications_tenant
+      ON guardian_verifications(tenant_id);
+
+    -- In-flight World ID proof requests (server-driven idkit-core flow): created by
+    -- POST /world-id/request, consumed by GET /world-id/status/:requestId.
+    CREATE TABLE IF NOT EXISTS world_requests (
+      request_id  TEXT PRIMARY KEY,
+      tenant_id   TEXT NOT NULL,
+      action      TEXT NOT NULL,
+      nonce       TEXT,
+      status      TEXT NOT NULL,          -- pending | verified | failed
+      detail      TEXT,
+      created_at  INTEGER NOT NULL,
+      expires_at  INTEGER NOT NULL
+    );
+
+    -- AgentKit seller-side: single-use nonces from the 402 agentkit extension (replay guard).
+    CREATE TABLE IF NOT EXISTS world_nonces (
+      nonce      TEXT PRIMARY KEY,
+      used_at    INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    -- Per-human AUTHORIZATION allowance per resource (NOT a discount/perk — an execution
+    -- limit inside the legal-body governance flow).
+    CREATE TABLE IF NOT EXISTS world_usage (
+      human_id   TEXT NOT NULL,
+      resource   TEXT NOT NULL,
+      used       INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (human_id, resource)
+    );
+
+    -- Cache of AgentBook lookupHuman(address) reads (World Chain RPC) so demo-time RPC
+    -- flakiness cannot stall the paywall. Only POSITIVE results are cached (fail-closed).
+    CREATE TABLE IF NOT EXISTS world_human_cache (
+      agent_address TEXT PRIMARY KEY,
+      human_id      TEXT NOT NULL,
+      cached_at     INTEGER NOT NULL
+    );
   `);
 
   // Additive migration for pre-existing dev DBs (new tables/columns only).

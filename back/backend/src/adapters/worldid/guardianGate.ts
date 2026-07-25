@@ -1,0 +1,195 @@
+import { IDKit, proofOfHuman } from "@worldcoin/idkit-core";
+import { signRequest } from "@worldcoin/idkit-core/signing";
+
+/** World ID config slice (mirrors Config["world"]). */
+export interface WorldIdConfig {
+  appId: string;
+  rpId: string;
+  rpSigningKey: string;
+  action: string;
+  environment: "production" | "staging" | "sandbox";
+}
+
+const VERIFY_HOST = "https://developer.world.org";
+
+/** Credential identifiers acceptable for GUARDIANSHIP. A guardian is the legally accountable
+ *  natural person, so we require Orb-grade uniqueness (v4 proof_of_human / v3 orb) or a
+ *  government-document tier. Device/selfie tiers are rejected — they prove neither uniqueness
+ *  nor identity strongly enough for a FinCEN-CDD-shaped role. */
+const ACCEPTED_CREDENTIALS = new Set([
+  "proof_of_human",
+  "orb",
+  "passport",
+  "secure_document",
+  "document",
+]);
+
+export class WorldIdError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** v4 requires a signed rp_context on every request. camelCase -> snake_case is intentional. */
+export function makeRpContext(cfg: WorldIdConfig) {
+  const { sig, nonce, createdAt, expiresAt } = signRequest({
+    signingKeyHex: cfg.rpSigningKey,
+    action: cfg.action,
+    ttl: 300,
+  });
+  return { rp_id: cfg.rpId, nonce, created_at: createdAt, expires_at: expiresAt, signature: sig };
+}
+
+export interface StartedVerification {
+  requestId: string;
+  connectorURI: string;
+  /** Resolves when the human approves/rejects in World App (or the bridge times out). */
+  completion: Promise<{ success: boolean; result?: unknown; error?: unknown }>;
+}
+
+let fetchPatchedForWasm = false;
+
+/**
+ * WORKAROUND — @worldcoin/idkit-core@4.2.2 cannot initialize in plain Node.
+ *
+ * Its WASM loader resolves the bundled `idkit_wasm_bg.wasm` to a `file://` URL and then calls
+ * `fetch()` on it. Browsers and bundlers handle that; Node's fetch does not support the file
+ * scheme, so every request fails with "Failed to initialize IDKit WASM: TypeError: fetch failed".
+ * `initIDKit()` takes no argument and isn't exported, so there is no supported way to hand it
+ * the module.
+ *
+ * We install a narrow shim: `file://` URLs are read from disk and returned as a Response;
+ * every other request is delegated to the original fetch untouched. Installed once, lazily,
+ * and only on the Node path.
+ */
+function ensureNodeWasmFetch(): void {
+  if (fetchPatchedForWasm || typeof globalThis.fetch !== "function") return;
+  const original = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : (input as Request).url;
+    if (url?.startsWith("file://")) {
+      const [{ readFile }, { fileURLToPath }] = await Promise.all([
+        import("node:fs/promises"),
+        import("node:url"),
+      ]);
+      const bytes = await readFile(fileURLToPath(url));
+      return new Response(bytes, {
+        status: 200,
+        headers: { "content-type": "application/wasm" },
+      });
+    }
+    return original(input, init);
+  }) as typeof fetch;
+  fetchPatchedForWasm = true;
+}
+
+/** Open a World ID proof request. `signal` binds the tenant wallet into the proof. */
+export async function startGuardianVerification(
+  cfg: WorldIdConfig,
+  tenantWallet: string,
+): Promise<StartedVerification> {
+  ensureNodeWasmFetch();
+  const request = await IDKit.request({
+    app_id: cfg.appId,
+    action: cfg.action,
+    rp_context: makeRpContext(cfg),
+    allow_legacy_proofs: true,
+    environment: cfg.environment,
+    // biome-ignore lint/suspicious/noExplicitAny: SDK request config typing is loose across versions.
+  } as any).preset(proofOfHuman({ signal: tenantWallet }));
+
+  return {
+    requestId: request.requestId,
+    connectorURI: request.connectorURI,
+    completion: request.pollUntilCompletion({
+      pollInterval: 2_000,
+      timeout: 300_000,
+      // biome-ignore lint/suspicious/noExplicitAny: poll options typing varies by SDK version.
+    } as any) as Promise<{ success: boolean; result?: unknown; error?: unknown }>,
+  };
+}
+
+export interface VerifiedProof {
+  /** Decimal-normalized nullifier — the ONLY identity datum we store. */
+  nullifier: string;
+  credential: string;
+  issuerSchemaId: number | null;
+  environment: string | null;
+  expiresAtMin: number | null;
+  raw: unknown;
+}
+
+/** Forward the IDKit result AS-IS to the Developer Portal and enforce the credential tier.
+ *  Sending the payload byte-for-byte matters — remapping it is the #1 cause of invalid_proof. */
+export async function verifyProof(
+  cfg: WorldIdConfig,
+  idkitResult: unknown,
+  fetchImpl: typeof fetch = fetch,
+): Promise<VerifiedProof> {
+  const res = await fetchImpl(`${VERIFY_HOST}/api/v4/verify/${cfg.rpId}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(idkitResult),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    code?: string;
+    detail?: string;
+    nullifier?: string;
+    environment?: string;
+    results?: {
+      identifier?: string;
+      success?: boolean;
+      nullifier?: string;
+      code?: string;
+      detail?: string;
+    }[];
+  };
+  if (!res.ok || !body.success)
+    throw new WorldIdError(
+      body.code ?? "verify_failed",
+      body.detail ?? `verify HTTP ${res.status}`,
+    );
+
+  // 200 means at least one proof verified; pick the first successful result of an accepted tier.
+  const ok = (body.results ?? []).filter((r) => r.success !== false);
+  const accepted = ok.find((r) => r.identifier && ACCEPTED_CREDENTIALS.has(r.identifier));
+  if (!accepted)
+    throw new WorldIdError(
+      "credential_not_accepted",
+      `guardianship requires an Orb or document-grade credential; got ${
+        ok.map((r) => r.identifier).join(",") || "none"
+      }`,
+    );
+
+  const rawNullifier = accepted.nullifier ?? body.nullifier;
+  if (!rawNullifier) throw new WorldIdError("no_nullifier", "verify response carried no nullifier");
+
+  // Normalize to decimal: hex casing/parsing differences would otherwise defeat the dedupe.
+  let nullifier: string;
+  try {
+    nullifier = BigInt(rawNullifier).toString(10);
+  } catch {
+    throw new WorldIdError("bad_nullifier", "nullifier is not a parseable integer");
+  }
+
+  const item = ((
+    idkitResult as { responses?: { issuer_schema_id?: number; expires_at_min?: number }[] }
+  )?.responses ?? [])[0];
+  return {
+    nullifier,
+    credential: accepted.identifier as string,
+    issuerSchemaId: item?.issuer_schema_id ?? null,
+    environment: body.environment ?? null,
+    expiresAtMin: item?.expires_at_min ?? null,
+    raw: body,
+  };
+}

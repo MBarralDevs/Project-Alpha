@@ -14,6 +14,10 @@ import type {
   PasskeyView,
   ReputationView,
   TreasuryView,
+  WorldIdContext,
+  WorldIdMe,
+  WorldIdRequestView,
+  WorldIdStatusView,
 } from "./types";
 import { ApiError } from "./types";
 
@@ -43,7 +47,11 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
     const err =
       json && typeof json === "object" && "error" in json
         ? (json as ApiErrorBody).error
-        : { code: "http_error", message: res.statusText };
+        : {
+            code: "http_error",
+            // statusText is often empty (HTTP/2, bare 500s) — never surface a blank error.
+            message: res.statusText || `Request failed (HTTP ${res.status})`,
+          };
     throw new ApiError(res.status, err);
   }
 
@@ -218,4 +226,30 @@ export async function revokePasskey(token: string, id: string): Promise<void> {
 
 export async function fetchAgentSchema(): Promise<Record<string, unknown>> {
   return request("/schema/agent-spec.json");
+}
+
+// ── World ID guardian verification ────────────────────────────────────────────
+/** Current guardian-verification state for the signed-in wallet. */
+export function worldIdMe(token: string): Promise<WorldIdMe> {
+  return request<WorldIdMe>("/world-id/me", { token });
+}
+
+/** Open a World ID verification request; returns a connectorURI to scan in World App. */
+export function worldIdRequest(token: string): Promise<WorldIdRequestView> {
+  return request<WorldIdRequestView>("/world-id/request", { token, body: {} });
+}
+
+/** Poll a verification request until it resolves. */
+export function worldIdStatus(token: string, requestId: string): Promise<WorldIdStatusView> {
+  return request<WorldIdStatusView>(`/world-id/status/${requestId}`, { token });
+}
+
+/** Params for the browser IDKit widget, including the v4-mandatory signed request context. */
+export function worldIdContext(token: string): Promise<WorldIdContext> {
+  return request<WorldIdContext>("/world-id/context", { token });
+}
+
+/** Submit a proof produced by the browser widget for verification + binding. */
+export function worldIdVerify(token: string, proof: unknown): Promise<WorldIdStatusView> {
+  return request<WorldIdStatusView>("/world-id/verify", { token, body: { proof } });
 }
