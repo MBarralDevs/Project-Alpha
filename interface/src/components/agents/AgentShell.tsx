@@ -21,7 +21,7 @@ export function AgentShell({
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 hero-mesh-dark opacity-70" />
       <header className="sticky top-0 z-40 border-b hairline bg-paper/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-[1180px] items-center justify-between gap-4 px-5 lg:px-8">
-          <div className="flex min-w-0 items-center gap-4">
+          <div className="flex shrink-0 items-center gap-4">
             <Wordmark />
             {title && (
               <div className="hidden min-w-0 sm:block">
@@ -32,7 +32,8 @@ export function AgentShell({
               </div>
             )}
           </div>
-          <nav className="flex shrink-0 items-center gap-2">
+          {/* Scrolls rather than forcing the page wider than the viewport on narrow screens. */}
+          <nav className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-x-auto [&>*]:shrink-0">
             <NavLink href="/agents">My agents</NavLink>
             <NavLink href="/agents/account">Account</NavLink>
             <NavLink href="/agents/connect">Connect an agent</NavLink>

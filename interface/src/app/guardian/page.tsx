@@ -5,10 +5,9 @@ import { IDKitRequestWidget, proofOfHuman } from "@worldcoin/idkit";
 import { worldIdContext, worldIdMe, worldIdVerify } from "@/lib/api/client";
 import type { WorldIdContext, WorldIdMe } from "@/lib/api/types";
 import { AgentShell } from "@/components/agents/AgentShell";
-import { LoadingState, RequireAuth } from "@/components/agents/RequireAuth";
+import { RequireAuth } from "@/components/agents/RequireAuth";
+import { GuardianRecord } from "@/components/guardian/GuardianRecord";
 import { useAuth } from "@/components/onboarding/AuthProvider";
-import { Button, Callout, Card, cx } from "@/components/onboarding/primitives";
-import { shortAddress } from "@/components/onboarding/types";
 
 export default function GuardianPage() {
   return (
@@ -24,6 +23,7 @@ function GuardianVerification() {
   const [ctx, setCtx] = React.useState<WorldIdContext | null>(null);
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [struck, setStruck] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const refresh = React.useCallback(async () => {
@@ -31,7 +31,7 @@ function GuardianVerification() {
       const s = await ensureSession();
       setMe(await worldIdMe(s.token));
     } catch (e) {
-      setError((e as Error).message || "Could not load your guardian status.");
+      setError((e as Error).message || "Could not read your guardian record.");
     }
   }, [ensureSession]);
 
@@ -63,103 +63,24 @@ function GuardianVerification() {
     [ensureSession],
   );
 
-  const verified = me?.verified ?? false;
+  // The strike plays once, when a verification lands — not on every render of a verified page.
+  React.useEffect(() => {
+    if (!struck) return;
+    const t = setTimeout(() => setStruck(false), 2400);
+    return () => clearTimeout(t);
+  }, [struck]);
 
   return (
     <AgentShell title="Guardian" subtitle="The legally accountable human behind your agents.">
-      <div className="flex flex-col gap-4">
-        {/* Header: what this is + current standing */}
-        <Card>
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-3">
-                <h2 className="text-lg text-ink">Proof of personhood</h2>
-                <span
-                  className={cx(
-                    "rounded-full border px-2.5 py-0.5 text-[11px] uppercase tracking-wider",
-                    verified
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                      : "border-line-strong bg-paper-3 text-muted",
-                  )}
-                >
-                  {verified ? "Verified human" : "Unverified"}
-                </span>
-              </div>
-              <p className="max-w-[58ch] text-sm leading-relaxed text-muted">
-                A Wyoming DAO LLC must have a real natural person behind it — that&apos;s the law,
-                not a product choice. World ID proves a unique human is here, without revealing
-                who they are.
-              </p>
-              {address ? (
-                <p className="text-xs text-muted-2">Guardian wallet {shortAddress(address)}</p>
-              ) : null}
-            </div>
-
-            <div className="shrink-0">
-              {verified ? (
-                <Button variant="ghost" onClick={() => void begin()} disabled={busy}>
-                  Verify again
-                </Button>
-              ) : (
-                <Button onClick={() => void begin()} disabled={busy}>
-                  {busy ? "Preparing…" : "Verify with World ID"}
-                </Button>
-              )}
-            </div>
-          </div>
-        </Card>
-
-        {error ? <ErrorNote error={error} /> : null}
-
-        {me === null ? <LoadingState label="Checking your guardian status…" /> : null}
-
-        {/* Standing */}
-        {me ? (
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Metric
-              label="Status"
-              value={verified ? "Accountable human" : "None yet"}
-              tone={verified ? "good" : "idle"}
-            />
-            <Metric
-              label="Credential"
-              value={verified ? (me.credential ?? "verified") : "—"}
-              tone={verified ? "good" : "idle"}
-            />
-            <Metric
-              label="Legal entities"
-              value={
-                me.maxEntities != null ? `${me.entitiesUsed ?? 0} / ${me.maxEntities}` : "—"
-              }
-              tone="idle"
-              hint="one human, a capped number of companies"
-            />
-          </div>
-        ) : null}
-
-        {/* What it means */}
-        <Card>
-          <div className="flex flex-col gap-3">
-            <h3 className="text-base text-ink">
-              {verified ? "What this guarantees" : "What verifying does"}
-            </h3>
-            <ul className="flex flex-col gap-2 text-sm text-muted">
-              <Point>
-                Every agent under this account inherits a named controller who can pause it, claw
-                back its funds, and dissolve the company.
-              </Point>
-              <Point>
-                The same human cannot quietly control many accounts — one person, a limited number
-                of legal entities.
-              </Point>
-              <Point>
-                We store only a nullifier: a value unique to you inside this app and meaningless
-                anywhere else. It never identifies you.
-              </Point>
-            </ul>
-          </div>
-        </Card>
-      </div>
+      <GuardianRecord
+        me={me}
+        address={address}
+        busy={busy}
+        loading={me === null && error === null}
+        struck={struck}
+        error={error}
+        onVerify={() => void begin()}
+      />
 
       {/* World's own widget handles the QR, deep links and device handoff. */}
       {ctx ? (
@@ -177,87 +98,16 @@ function GuardianVerification() {
           onSuccess={() => {
             setOpen(false);
             setError(null);
+            setStruck(true);
             void refresh();
           }}
           onError={(e: unknown) => {
-            const code =
-              typeof e === "string" ? e : ((e as { code?: string })?.code ?? String(e));
+            const code = typeof e === "string" ? e : ((e as { code?: string })?.code ?? String(e));
             setOpen(false);
             setError(`world:${code}`);
           }}
         />
       ) : null}
     </AgentShell>
-  );
-}
-
-/** Turns World/API failures into something a person can act on. */
-function ErrorNote({ error }: { error: string }) {
-  const code = error.startsWith("world:") ? error.slice(6) : "";
-  if (code === "max_verifications_reached")
-    return (
-      <Callout tone="warn" title="World has already verified you for this action">
-        You&apos;re a real, unique human — World just won&apos;t issue a second proof, because this
-        action is capped at one verification per person. Raise{" "}
-        <span className="text-ink">Max verifications per user</span> for the{" "}
-        <span className="text-ink">guardian-verification</span> action in the World Developer
-        Portal, then try again.
-      </Callout>
-    );
-  if (code === "user_rejected" || code === "verification_rejected")
-    return (
-      <Callout tone="warn" title="Verification cancelled">
-        You dismissed the request in World App. Nothing was recorded — start again whenever
-        you&apos;re ready.
-      </Callout>
-    );
-  if (code === "credential_unavailable")
-    return (
-      <Callout tone="warn" title="Orb credential required">
-        Guardianship needs an Orb or document-grade credential — a device-only World ID
-        isn&apos;t enough to be legally accountable for an agent.
-      </Callout>
-    );
-  if (error.toLowerCase().includes("already the guardian"))
-    return (
-      <Callout tone="warn" title="This human already backs another account">
-        The sybil gate working as intended: one person cannot quietly back two separate accounts.
-      </Callout>
-    );
-  return (
-    <Callout tone="warn" title="Not verified">
-      {code || error}
-    </Callout>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  tone,
-  hint,
-}: {
-  label: string;
-  value: string;
-  tone: "good" | "idle";
-  hint?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1 rounded-xl border border-line bg-paper-2 p-4">
-      <span className="text-[11px] uppercase tracking-wider text-muted-2">{label}</span>
-      <span className={cx("text-sm", tone === "good" ? "text-emerald-300" : "text-ink")}>
-        {value}
-      </span>
-      {hint ? <span className="text-[11px] text-muted-2">{hint}</span> : null}
-    </div>
-  );
-}
-
-function Point({ children }: { children: React.ReactNode }) {
-  return (
-    <li className="flex gap-2.5 leading-relaxed">
-      <span aria-hidden className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-muted-2" />
-      <span>{children}</span>
-    </li>
   );
 }

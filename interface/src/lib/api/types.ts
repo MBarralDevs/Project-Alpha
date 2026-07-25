@@ -185,6 +185,8 @@ export type WorldIdMe = {
   required: boolean;
   credential?: string;
   verifiedAt?: number;
+  /** Per-app pseudonym — the only identity datum stored, and the seed for the guardian seal. */
+  nullifier?: string;
   entitiesUsed?: number;
   maxEntities?: number;
 };

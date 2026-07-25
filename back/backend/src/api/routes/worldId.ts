@@ -189,6 +189,7 @@ export function mountWorldIdRoutes(app: Hono<{ Variables: AuthVars }>, deps: Api
     return c.json({
       status: "verified",
       credential: proof.credential,
+      nullifier: proof.nullifier,
       entitiesUsed: world.store.countEntitiesForNullifier(proof.nullifier, world.cfg.action),
       maxEntities: world.maxEntitiesPerHuman,
     });
@@ -204,6 +205,9 @@ export function mountWorldIdRoutes(app: Hono<{ Variables: AuthVars }>, deps: Api
       required: world.requireGuardian,
       credential: v.credential,
       verifiedAt: v.verifiedAt,
+      // The caller's own pseudonym. Safe to show them: it is scoped to this app and identifies
+      // no one outside it — and seeing it is the point, it's the only datum we keep.
+      nullifier: v.nullifier,
       entitiesUsed: world.store.countEntitiesForNullifier(v.nullifier, world.cfg.action),
       maxEntities: world.maxEntitiesPerHuman,
     });
