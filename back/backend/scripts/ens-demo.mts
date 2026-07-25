@@ -22,9 +22,26 @@ const ARC_RPC = process.env.ARC_TESTNET_RPC_URL ?? "https://rpc.testnet.arc.netw
 const REGISTRY = (process.env.IDENTITY_REGISTRY ??
   "0x8004A818BFB912233c491871b3d84c89A494BD9e") as Address;
 const CHAIN_ID = Number(process.env.ARC_CHAIN_ID ?? 5042002);
-const gatewayUrls = process.env.GATEWAY_URL ? [process.env.GATEWAY_URL] : undefined;
-
-const eth = createPublicClient({ chain: sepolia, transport: http(SEPOLIA) });
+// When GATEWAY_URL is set (e.g. a local/tunnel gateway), route viem's CCIP-read fetch there instead
+// of the resolver's baked-in URL. viem still runs the real OffchainLookup + on-chain resolveWithProof;
+// only the HTTP fetch target changes. Without it, viem uses the resolver's own URL (prod/tunnel).
+const LOCAL_GW = process.env.GATEWAY_URL;
+const gatewayUrls = undefined;
+const eth = createPublicClient({
+  chain: sepolia,
+  transport: http(SEPOLIA),
+  ...(LOCAL_GW
+    ? {
+        ccipRead: {
+          request: async ({ sender, data }: { sender: Address; data: Hex }) => {
+            const u = LOCAL_GW.replace("{sender}", sender.toLowerCase()).replace("{data}", data);
+            const j = (await (await fetch(u)).json()) as { data: Hex };
+            return j.data;
+          },
+        },
+      }
+    : {}),
+});
 const arc = createPublicClient({
   chain: defineChain({
     id: CHAIN_ID,
@@ -57,8 +74,10 @@ async function main() {
   // 3. metadata URL -> agentId + registry (ENSIP-25 registrations block).
   const url = await eth.getEnsText({ name, key: "url", gatewayUrls, strict: true });
   console.log(`3. metadata url:       ${url || "(empty)"}`);
-  let agentId: string | undefined;
-  if (url) {
+  // agentId comes from the metadata JSON's registrations block; AGENT_ID env overrides (for local
+  // demos where the metadata JSON isn't served for the demo label).
+  let agentId: string | undefined = process.env.AGENT_ID;
+  if (!agentId && url) {
     try {
       const meta = (await (await fetch(url)).json()) as {
         registrations?: { agentId?: string; agentRegistry?: string }[];
