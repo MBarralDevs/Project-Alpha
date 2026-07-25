@@ -45,6 +45,21 @@ describe("mintAgentkitExtension", () => {
     expect(ext.agentkit.supportedChains.length).toBeGreaterThan(0);
   });
 
+  test("REGRESSION: nonce is alphanumeric (SIWE rejects hyphens -> silent skip)", () => {
+    // randomUUID() is the obvious choice and is what World's own example shows, but its hyphens
+    // make the client's createHeader throw a SiweError, which it swallows as `agentkit_skipped`:
+    // the agent is never authorized and nothing surfaces the reason. Keep this alphanumeric.
+    for (let i = 0; i < 20; i++) {
+      const ext = mintAgentkitExtension({
+        domain: "example.com",
+        resourceUrl: RESOURCE_URL,
+        network: "eip155:5042002",
+        allowancePerHuman: 3,
+      }) as { agentkit: { info: { nonce: string } } };
+      expect(ext.agentkit.info.nonce).toMatch(/^[a-zA-Z0-9]{8,}$/);
+    }
+  });
+
   test("each mint carries a fresh nonce (no cross-response replay)", () => {
     const a = mintAgentkitExtension({
       domain: "example.com",

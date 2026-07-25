@@ -568,7 +568,12 @@ export function mintAgentkitExtension(cfg: { domain: string; resourceUrl: string
     mode: { type: "free-trial", uses: 3 },    // advertised to clients; enforcement is ours
   });
   const a = ext.agentkit;
-  a.info.nonce = randomUUID();
+  // ⚠ FIELD-CORRECTION (2026-07-25, hit in W4/W5): the nonce MUST be ALPHANUMERIC. randomUUID()
+  // (shown below and in World's own example) contains hyphens, so the client's createHeader throws
+  // SiweError "Nonce size smaller then 8 characters or is not alphanumeric" — which agentkitFetch
+  // SWALLOWS as `agentkit_skipped`, i.e. the agent silently never gets authorized and no error
+  // surfaces anywhere. Use randomBytes(16).toString("hex") instead.
+  a.info.nonce = randomBytes(16).toString("hex");   // NOT randomUUID()
   a.info.issuedAt = new Date().toISOString();
   a.info.expirationTime = new Date(Date.now() + 5 * 60_000).toISOString();
   return ext; // spread as a TOP-LEVEL `extensions` key next to `accepts`

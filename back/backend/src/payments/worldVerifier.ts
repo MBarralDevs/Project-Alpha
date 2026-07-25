@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   createAgentBookVerifier,
   declareAgentkitExtension,
@@ -60,7 +60,11 @@ export function mintAgentkitExtension(cfg: {
       "Prove this agent is backed by a verified unique human to be authorized on this resource",
   }) as unknown as { agentkit: { info: Record<string, unknown> } };
   const info = ext.agentkit.info;
-  info.nonce = randomUUID();
+  // MUST be alphanumeric: the client builds an EIP-4361 SIWE message from these fields, and SIWE
+  // rejects non-alphanumeric nonces ("Nonce size smaller then 8 characters or is not alphanumeric").
+  // randomUUID() looks like the obvious choice but its hyphens make createHeader throw a SiweError,
+  // which the client swallows as `agentkit_skipped` — i.e. a silent, un-authorized fallthrough.
+  info.nonce = randomBytes(16).toString("hex");
   info.issuedAt = new Date().toISOString();
   info.expirationTime = new Date(Date.now() + 5 * 60_000).toISOString();
   return ext;
