@@ -14,6 +14,9 @@ import type {
   PasskeyView,
   ReputationView,
   TreasuryView,
+  WorldIdMe,
+  WorldIdRequestView,
+  WorldIdStatusView,
 } from "./types";
 import { ApiError } from "./types";
 
@@ -218,4 +221,20 @@ export async function revokePasskey(token: string, id: string): Promise<void> {
 
 export async function fetchAgentSchema(): Promise<Record<string, unknown>> {
   return request("/schema/agent-spec.json");
+}
+
+// ── World ID guardian verification ────────────────────────────────────────────
+/** Current guardian-verification state for the signed-in wallet. */
+export function worldIdMe(token: string): Promise<WorldIdMe> {
+  return request<WorldIdMe>("/world-id/me", { token });
+}
+
+/** Open a World ID verification request; returns a connectorURI to scan in World App. */
+export function worldIdRequest(token: string): Promise<WorldIdRequestView> {
+  return request<WorldIdRequestView>("/world-id/request", { token, body: {} });
+}
+
+/** Poll a verification request until it resolves. */
+export function worldIdStatus(token: string, requestId: string): Promise<WorldIdStatusView> {
+  return request<WorldIdStatusView>(`/world-id/status/${requestId}`, { token });
 }
