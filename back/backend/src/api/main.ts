@@ -13,6 +13,7 @@ import { buildJobDeps } from "../jobs/composition";
 import { buildEntityPaymentService } from "../payments/entityPayment";
 import { PaymentLedger } from "../payments/ledger";
 import { buildPocketFunding } from "../payments/pocketFunding";
+import { buildReadExposure } from "../payments/standingExposure";
 import { SqliteAgentRunStore } from "../persistence/agentRunStore";
 import { SqliteApiKeyStore } from "../persistence/apiKeyStore";
 import { SqliteChallengeStore } from "../persistence/challengeStore";
@@ -23,6 +24,7 @@ import { SqliteLinkCodeStore } from "../persistence/linkCodeStore";
 import { SqlitePasskeyStore } from "../persistence/passkeyStore";
 import { SqlitePaymentIdempotencyStore } from "../persistence/paymentIdempotencyStore";
 import { SqliteWorldStore } from "../persistence/worldStore";
+import { usdToUnits } from "../policy/units";
 import type { Address } from "../types";
 import { runOnboarding } from "../workflow/onboarding";
 import { OnboardingRunner, type RunSaga } from "../workflow/runner";
@@ -72,6 +74,16 @@ async function main() {
   // Explicit treasury->pocket top-up (fund_pocket tool/route). Same guard as `payments`: needs both
   // POCKET_MASTER_SEED (to derive the pocket) and Turnkey config (to sign as the operator).
   const pocketFunding = cfg.pocketMasterSeed && cfg.turnkey ? buildPocketFunding(cfg) : undefined;
+
+  // S2 standing-float-ceiling reads for the dashboard (GET /entities/:id/treasury). Same guard as
+  // `payments`: undefined when POCKET_MASTER_SEED isn't configured, in which case the route
+  // reports zeroed standing instead of failing to boot.
+  const standingExposure = cfg.pocketMasterSeed
+    ? {
+        read: buildReadExposure(cfg, arc),
+        ceilingAtomic: usdToUnits(cfg.maxPocketFloatUsdc).toString(),
+      }
+    : undefined;
 
   const provision = (p: {
     subOrgName: string;
@@ -209,6 +221,7 @@ async function main() {
     x402Demo,
     ens,
     worldId,
+    standingExposure,
   });
 
   const port = Number(process.env.PORT ?? 8789);

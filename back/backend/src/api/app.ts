@@ -71,6 +71,17 @@ export interface ApiDeps {
   /** Optional World ID guardian gate (proof-of-personhood). Present only when the WORLD_*
    *  portal credentials are set; absent -> routes not mounted and onboarding is ungated. */
   worldId?: import("./routes/worldId").WorldIdDeps;
+  /** S2 standing-float-ceiling reads for GET /entities/:id/treasury (dashboard). `read` is the same
+   *  wiring as entityPayment.status()'s `standing` (payments/standingExposure.ts#buildReadExposure);
+   *  `ceilingAtomic` is the configured MAX_POCKET_FLOAT_USDC, atomic USDC string. Optional for the
+   *  same reason as `payments`: absent when POCKET_MASTER_SEED isn't configured, in which case the
+   *  route reports zeroed standing. */
+  standingExposure?: {
+    read: (
+      entity: import("../types").EntityRecord,
+    ) => Promise<import("../payments/standingExposure").StandingExposure>;
+    ceilingAtomic: string;
+  };
 }
 
 /** Build the wizard REST API app: CORS + error envelope + /healthz. Routes mounted by later tasks. */
