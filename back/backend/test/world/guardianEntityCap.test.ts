@@ -12,6 +12,8 @@ function deps(opts: {
   verified: boolean;
   used: number;
   maxEntitiesPerHuman?: number;
+  /** UNIX SECONDS, as World actually sends it. */
+  expiresAtMin?: number | null;
 }): WorldIdDeps {
   return {
     cfg: { action: ACTION } as WorldIdDeps["cfg"],
@@ -19,7 +21,10 @@ function deps(opts: {
     attestMinAge: 18,
     maxEntitiesPerHuman: opts.maxEntitiesPerHuman,
     store: {
-      findByTenant: () => (opts.verified ? { nullifier: NULLIFIER } : undefined),
+      findByTenant: () =>
+        opts.verified
+          ? { nullifier: NULLIFIER, expiresAtMin: opts.expiresAtMin ?? null }
+          : undefined,
       countEntitiesForNullifier: () => opts.used,
     } as unknown as WorldIdDeps["store"],
   };
@@ -62,6 +67,22 @@ describe("assertGuardianAllowed", () => {
   test("at a configured ceiling -> blocked", () => {
     const d = deps({ requireGuardian: true, verified: true, used: 3, maxEntitiesPerHuman: 3 });
     expect(codeOf(() => assertGuardianAllowed(d, TENANT))).toBe("guardian_entity_cap");
+  });
+
+  // REGRESSION GUARD. `expires_at_min` looks like a credential expiry and is not one: measured
+  // on three real production verifications it lands 19-44s BEFORE the verification itself, so
+  // gating on it (as seconds) refuses every guardian on arrival. An earlier version of this fix
+  // did exactly that and would have taken entity creation down. Do not re-add gating until
+  // World tells us what the field means.
+  test("a past expires_at_min does NOT block the gate", () => {
+    const asSeenInProd = Math.floor(Date.now() / 1000) - 44;
+    const d = deps({ requireGuardian: true, verified: true, used: 0, expiresAtMin: asSeenInProd });
+    expect(codeOf(() => assertGuardianAllowed(d, TENANT))).toBeNull();
+  });
+
+  test("an absent expires_at_min does not block either", () => {
+    const d = deps({ requireGuardian: true, verified: true, used: 0, expiresAtMin: null });
+    expect(codeOf(() => assertGuardianAllowed(d, TENANT))).toBeNull();
   });
 
   test("already past a ceiling lowered after the fact -> blocked", () => {

@@ -25,6 +25,32 @@ export interface WorldIdDeps {
 
 const REQUEST_TTL_MS = 10 * 60_000;
 
+/** Why a World verification was refused. The backend logs nothing per-request, so when a scan
+ *  failed in the field we could not tell whether the proof had even reached us — only that the
+ *  user saw an error on their phone. Log the reason (never the nullifier; tenant truncated). */
+/**
+ * ⚠ `expires_at_min` is NOT a credential expiry — do not gate on it.
+ *
+ * Measured against three real production verifications (2026-07-25/26/29), the value is
+ * consistently 19–44 seconds BEFORE the moment we record the verification:
+ *
+ *   verified_at 2026-07-29T09:36:09Z   expires_at_min*1000 2026-07-29T09:35:26Z   (+44s)
+ *   verified_at 2026-07-26T10:07:12Z   expires_at_min*1000 2026-07-26T10:06:53Z   (+19s)
+ *   verified_at 2026-07-25T16:10:30Z   expires_at_min*1000 2026-07-25T16:10:02Z   (+29s)
+ *
+ * So it tracks the proof's own short-lived validity window, not how long the human's credential
+ * remains good. Read as seconds, every credential is "expired" on arrival — gating on it would
+ * refuse 100% of guardians. Read as minutes (the original code) it is the year 5363, i.e. it
+ * never fires, which is why nobody noticed. Neither reading is a credential lifetime.
+ *
+ * We therefore store the raw value for forensics and gate on nothing until World clarifies the
+ * field's meaning. Raised with them alongside the other AgentKit findings.
+ */
+
+function logWorldRejection(kind: string, tenantId: string, detail: string): void {
+  console.warn(`world-id ${kind} refused for ${tenantId.slice(0, 10)}…: ${detail}`);
+}
+
 /**
  * Guardian proof-of-personhood gate. Server-driven idkit-core flow so it works for BOTH the web
  * wizard and MCP-first onboarding (the client only needs to display/scan `connectorURI`).
@@ -170,16 +196,19 @@ export function mountWorldIdRoutes(app: Hono<{ Variables: AuthVars }>, deps: Api
       proof = await verifyProof(world.cfg, body.proof, tenantId);
     } catch (e) {
       const detail = e instanceof WorldIdError ? `${e.code}: ${e.message}` : String(e);
+      logWorldRejection("verify", tenantId, detail);
       throw new ApiError("verification_failed", 400, detail);
     }
 
     const existing = world.store.findByNullifier(proof.nullifier, world.cfg.action);
-    if (existing && existing.tenantId !== tenantId)
+    if (existing && existing.tenantId !== tenantId) {
+      logWorldRejection("verify", tenantId, "human already bound to another tenant");
       throw new ApiError(
         "human_already_bound",
         409,
         "this human is already the guardian of another account",
       );
+    }
 
     world.store.recordVerification({
       nullifier: proof.nullifier,
@@ -252,6 +281,7 @@ export function mountWorldIdRoutes(app: Hono<{ Variables: AuthVars }>, deps: Api
       );
     } catch (e) {
       const detail = e instanceof WorldIdError ? `${e.code}: ${e.message}` : String(e);
+      logWorldRejection("attestation", tenantId, detail);
       throw new ApiError("attestation_failed", 400, detail);
     }
 
@@ -345,8 +375,8 @@ export function mountWorldIdRoutes(app: Hono<{ Variables: AuthVars }>, deps: Api
     const action = world.cfg.attestAction;
     if (!action) return { formationReady: false };
     const a = world.store.findAttestationByTenant(tenantId, action);
-    // expires_at_min is a UNIX minute count, not milliseconds.
-    const live = a && (a.expiresAtMin == null || a.expiresAtMin * 60_000 > Date.now());
+    // Deliberately not gated on expires_at_min — see the note above the imports.
+    const live = Boolean(a);
     if (!a || !live) return { formationReady: false };
     return {
       formationReady: true,
