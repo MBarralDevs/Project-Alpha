@@ -1,5 +1,9 @@
 # SPEC — The Graph Integration: subgraph + governed pay-per-query (Build 2 of 3)
 
+> **⚠ POST-HACKATHON STATUS: only G1 (the walking-skeleton subgraph in `back/subgraph/`)
+> shipped; everything below describing G2+ was descoped during the event and is NOT built.
+> Kept as a planning record — see this directory's README for the full outcome.**
+
 Status: READY FOR IMPLEMENTATION.
 Authoritative detail source: [reference-thegraph.md](./reference-thegraph.md) — this spec defines *what to build and in what order*; the reference defines *exactly how* (final manifest/schema drafts live there in §3, AssemblyScript traps in §4). Where they disagree, the reference wins.
 Executor note: implement task by task, commit per task, run each checkpoint before moving on. **G1 must be deployed as early in the event as possible** — sync time is calendar time, not work time.

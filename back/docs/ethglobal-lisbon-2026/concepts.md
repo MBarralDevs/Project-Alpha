@@ -1,5 +1,8 @@
 # The Trust Stack, Explained — Concepts Behind the Three Integrations
 
+> **⚠ POST-HACKATHON STATUS: the World and ENS work below SHIPPED (🏆 World prize); the Graph
+> phases referenced here were descoped at G1 — see this directory's README for outcomes.**
+
 This is the non-technical companion to [technical-blueprints.md](./technical-blueprints.md).
 It explains what each tool *is*, what problem it solves for Novi Corpus, and how the pieces
 fit — the version you use for the pitch, for onboarding a teammate, or for talking to judges.

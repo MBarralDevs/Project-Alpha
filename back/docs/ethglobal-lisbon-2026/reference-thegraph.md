@@ -1,5 +1,9 @@
 # The Graph × Novi Corpus — Complete Build Reference (ETHGlobal Lisbon 2026)
 
+> **⚠ POST-HACKATHON STATUS: only G1 (the walking-skeleton subgraph in `back/subgraph/`)
+> shipped; everything below describing G2+ was descoped during the event and is NOT built.
+> Kept as a planning record — see this directory's README for the full outcome.**
+
 **Verified: 2026-07-24 (live probes against the gateways, npm, the Networks Registry, and this repo).**
 Companion to `technical-blueprints.md` §1 — this is the offline, at-the-venue working document.
 **Read §10 (Corrections) first if you built a mental model from the blueprint: the x402 leg changed materially.**

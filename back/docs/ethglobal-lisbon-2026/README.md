@@ -1,5 +1,14 @@
 # ETHGlobal Lisbon 2026 — Novi Corpus Continuity Build
 
+> **⚠ POST-HACKATHON STATUS (2026-07-30).** These are the *pre-event planning docs*, kept as a
+> historical record — targets, hour budgets, and booth questions below reflect planning, not
+> outcomes. What actually shipped: **ENS in full** (CCIP wildcard resolver + ENSIP-25
+> verification, live on prod) · **World in full** (guardian gate + AgentKit seller — 🏆 won the
+> World sponsor prize) · **The Graph: G1 only** — the `novi-corpus-arc` walking-skeleton subgraph
+> (`back/subgraph/`) was deployed; **G2–G7 (full schema, watcher/alerts, x402-paid query gateway,
+> MCP/SKILL packaging) were descoped during the event and are NOT built.** For what exists today,
+> see `back/docs/` (specs, research, runbooks).
+
 **Event:** ETHGlobal Lisbon, July 24–26 2026, Pavilhão Carlos Lopes.
 **Track:** Continuity Track ("Extend Open Source" path) — first ETHGlobal event allowing work on an existing codebase. Novi Corpus (this repo) is the pre-existing project.
 

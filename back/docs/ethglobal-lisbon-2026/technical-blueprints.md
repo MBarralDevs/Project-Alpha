@@ -1,5 +1,8 @@
 # ETHGlobal Lisbon 2026 — Implementation Blueprints (The Graph × World × ENS)
 
+> **⚠ POST-HACKATHON STATUS: the World and ENS work below SHIPPED (🏆 World prize); the Graph
+> phases referenced here were descoped at G1 — see this directory's README for outcomes.**
+
 Research date: 2026-07-24. All facts verified against live docs, npm, on-chain state, and this repo.
 Constraint honored throughout: **core contracts stay on Arc**; every integration is additive.
 
