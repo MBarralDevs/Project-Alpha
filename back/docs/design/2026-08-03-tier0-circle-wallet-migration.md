@@ -116,13 +116,42 @@ path — or prove 1271 first); (5) flip the entity's `walletProvider` column. Ne
 means AgentBook re-registration for human-backing — cheap today (none of our agents' pockets are
 registered; only the standalone proof-demo key is).
 
+## UI & compatibility surface
+
+**Compatibility guarantee (verify in the spec audit, don't just assert):** existing agents stay
+on `turnkey` untouched; every external interface keeps its shape — MCP tools (`fund_pocket`,
+`pay`, `run_job`, `onboard_agent`), REST, ENS, `/proof`, World flows, trust dials, treasury
+contracts. A connected BYOA agent cannot tell which custody path it is on.
+
+**UI work (small, mostly additive):**
+
+1. **Custody selector** — new onboarding step, two cards mirroring the capability selector:
+   "Novi-managed (recommended)" vs "Passkey-rooted (sovereign)", with the honest one-line
+   trade-off on each (gasless/simple vs your-passkey-outranks-the-platform + metered-signature
+   costs). MCP `onboard_agent` takes the platform default unless an optional param overrides.
+2. **Passkey step REWORDED, not removed.** Current copy says the passkey provisions the Turnkey
+   sub-org; on the `circle` path there is no sub-org, but the step stays on BOTH paths because
+   the passkey is the guardian's recorded identity anchor (`root_passkey_id`, #67) for future
+   same-guardian re-verification. New copy: "this registers you as the guardian", path-aware.
+3. **Dashboard touches:** custody badge on the agent page ("Novi-managed" / "Passkey-rooted");
+   standing-exposure labels path-aware (pocket line ~0 on `circle`; "operator (smart account)");
+   anything rendering `fund_pocket`'s tx-hash array adapts (fewer/different-shaped hashes on the
+   `circle` path).
+
+**Visible-but-not-breakage differences to expect:** faster funding on `circle` (no gas-seed
+waits); `turnkey_sigs` meter reads zero for `circle` agents. Both are the point.
+
+**Known unknown that gates NEW `circle` agents only:** the ERC-8004 `setAgentWallet` bind with a
+smart-account (1271) signature against the LIVE registry — proven in P2 before anything ships;
+migrating agents sidestep it (bind with the old key pre-rotation).
+
 ## Phased plan
 
 - **P1 — build (hermetic, 0 sigs, 0 spend):** `adapters/circle/` (DevC client, wallet-set/create,
   `signTypedData`/`signMessage`/`contractExecution` wrappers satisfying our existing signer +
   wallet seams); `entities.wallet_provider` column (`turnkey` | `circle`, default `turnkey` — the
-  flag that makes every later step reversible); parallel composition path. TDD + mutation, house
-  method; spec audit before code.
+  flag that makes every later step reversible); parallel composition path; the UI work above ships here behind the same flag. TDD +
+  mutation, house method; spec audit before code (incl. the compatibility guarantee).
 - **P2 — one testnet experiment** (resolves the cheap unknowns in one sitting): create 1 SCA + 1
   EOA on `ARC-TESTNET`; read `scaCore`; Gas Station sponsorship on Arc's USDC-native gas; 1271
   `isValidSignature` (incl. counterfactual); signature FORMAT from `sign/typedData` on the EOA
