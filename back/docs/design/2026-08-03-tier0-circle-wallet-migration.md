@@ -18,7 +18,7 @@ Circle's policy engine is still in customer discovery (NOT built).*
 2. **The operator CAN become a smart account, today.** Every operator surface is an on-chain
    transaction (`msg.sender`); AgentTreasury/LegalManager/Factory contain zero `ecrecover`, zero
    `tx.origin` — pure `msg.sender` roles (verified by grep). The single signature-shaped surface
-   is the one-time ERC-8004 `setAgentWallet` bind: our mock mirrors a live ERC-1271 fallback but
+   is the ERC-8004 `setAgentWallet` bind (REPEATABLE — the fork test re-binds twice; "one-time" only describes the current onboarding flow, and the migration's re-bind step depends on repeatability): our mock mirrors a live ERC-1271 fallback but
    it is UNPROVEN against the live registry → either prove with one fork test or sidestep (bind
    before rotating).
 3. **Circle DevC on Arc is real and priced per-wallet, not per-signature.** `ARC-TESTNET` enum
@@ -48,7 +48,13 @@ Circle's policy engine is still in customer discovery (NOT built).*
 
 ### The new funding flow — and everything it deletes
 
-Target bridge: `treasury.fundOperator` → **operator SCA (gasless)** → `GatewayWallet.depositFor(usdc, pocketEOA, amount)`.
+Target bridge (audit-corrected — THREE legs, not two): `treasury.fundOperator` → operator SCA
+**`approve(GatewayWallet)`** → **`GatewayWallet.depositFor(usdc, pocketEOA, amount)`** — Gateway
+PULLS via `transferFrom`, so the approve leg is real (verified in the SDK, which auto-fires it on
+short allowance). Approve policy must be explicit: exact-amount per bridge (default; +1 op each
+bridge) vs one-time infinite approve (standing approval from the float-holding SCA — reject) vs
+atomic approve+deposit batch IF `executeBatch` is confirmed (Vivienne Q3). With the possible
+1-tx SCA queue these are serialized UserOps — P2 measures the real latency.
 
 `depositFor` (verified in the Gateway ABI) lets anyone credit any depositor — so the **pocket EOA
 never holds on-chain funds and never sends a transaction at all**. It only signs off-chain: x402
@@ -58,16 +64,16 @@ payment authorizations and burn intents. Consequences, each currently a real sub
 - **pocket sweeps die** (nothing ever rests on the pocket EOA)
 - **standing exposure simplifies** to Gateway balance + SCA balance
 - **the `USDC_TRANSFER_GAS` estimate-gas footgun class dies** for migrated legs (UserOps, not EOA sends)
-- **`POCKET_MASTER_SEED` dies** → S3 closed
+- **`POCKET_MASTER_SEED` dies** → S3 **transformed, not closed**: keys leave our disk for Circle MPC (+ console controls, IP allowlist), but one platform credential pair (API key + entity secret) still commands the fleet's hot layer — see Secrets & recovery
 - **Turnkey signing (and its per-signature bill) exits the hot path** → the meter we just built
   becomes the tool that proves spend went to zero
 - the bridge's 2 Turnkey signatures become API calls with no marginal cost
 
-Note the SDK reality: `GatewayClient`/`BatchEvmScheme` are constructed from a raw private key, so
-the pocket's Circle-EOA integration replaces them with our own thin client: deposits happen via
-the operator SCA (`depositFor`), x402/burn-intent typed data is signed through Circle's
-`sign/typedData` endpoint behind our existing `signX402`/signer seam (which is already
-injectable — verified).
+Note the SDK reality (audit-corrected): `GatewayClient` is key-constructed, but `BatchEvmScheme`
+already takes a SIGNER OBJECT — and our `signX402` seam already feeds it one (`asBatchEvmSigner`
+wraps any `{address, signTypedData}`). So x402 signing needs only a Circle-API-backed signer
+dropped into the EXISTING seam; only the Gateway deposit/burn-intent client gets replaced
+(deposits move to the operator SCA via `depositFor`, burn intents to Circle `sign/typedData`).
 
 ### DECISION (2026-08-03, user): custody becomes a CHOICE, Turnkey stays
 
@@ -135,8 +141,10 @@ contracts. A connected BYOA agent cannot tell which custody path it is on.
    same-guardian re-verification. New copy: "this registers you as the guardian", path-aware.
 3. **Dashboard touches:** custody badge on the agent page ("Novi-managed" / "Passkey-rooted");
    standing-exposure labels path-aware (pocket line ~0 on `circle`; "operator (smart account)");
-   anything rendering `fund_pocket`'s tx-hash array adapts (fewer/different-shaped hashes on the
-   `circle` path).
+   `fund_pocket`'s tx-hash array has NO interface renderer (audit-verified — callers see raw MCP
+   JSON only), so no UI change there; instead the TOOL CONTRACT must be decided: block until all
+   legs confirm and return real hashes, or return Circle tx-ids in a tagged shape (see audit
+   section — Circle's API is async: tx-id first, hash after confirmation).
 
 **Visible-but-not-breakage differences to expect:** faster funding on `circle` (no gas-seed
 waits); `turnkey_sigs` meter reads zero for `circle` agents. Both are the point.
@@ -184,3 +192,90 @@ account-types, transaction-limits, api-rate-limits, DevC OpenAPI · circlefin/bu
 (`SingleOwnerMSCA`) · docs.arc.io AA providers · our node_modules (`@circle-fin/x402-batching`,
 `@worldcoin/agentkit-core`) · our contracts (`AgentTreasury.sol`, `LegalManagerFactory.sol`) ·
 full EOA-surface map (agent C report, reproduced as the P1 checklist in the PR that builds it).
+
+## Full-audit corrections (2026-08-03 — 2 adversarial agents, load-bearing findings re-verified first-hand)
+
+Fact-check: ~40 claims verified against contracts/SDKs/live docs; 3 corrected inline above
+(BatchEvmScheme signer seam, three-leg bridge, repeatable bind). The following are REQUIRED
+ADDITIONS — P1 is gated on them, in severity order:
+
+### Critical
+
+1. **Secrets & recovery (was entirely absent).** New `CIRCLE_ENTITY_SECRET`: added to env schema
+   + `redact()` (env.ts's own header warns new secrets silently leak otherwise); all-or-nothing
+   `circle` config block (mirror the turnkey block) so a half-config fails at boot; production
+   fail-closed: `wallet_provider='circle'` rows present + no circle config → refuse boot. The
+   Circle RECOVERY FILE is unrecoverable-by-design: offline custody, ≥2 locations, never on the
+   VPS or in the repo. Entity-secret ciphertext is per-request — never cached or logged. Sandbox
+   vs prod API keys separated; Circle console IP-allowlist on the prod key (part of the S3
+   mitigation story).
+2. **Migration quiescence gate (prevents stranded funds — verified race).** `runJob` resumes
+   steps from the LIVE entity row while the on-chain job pins the provider at creation: rotating
+   mid-job reverts subsequent steps AND releases earnings to the retired key after the drain.
+   Runbook preconditions per agent: zero jobs in `pending|created|funded|submitted` (CLI gate);
+   no funding in flight (persisted per-entity migration lock — the keyedMutex is in-process
+   only); drain the old operator AFTER quiescence; keep the Turnkey sub-org until the old EOA
+   reads 0 (the sweep tool signs as it). Code fix in P1: job steps resume from
+   `rec.providerAddress`, or hard-refuse when it mismatches `entity.operator`.
+3. **Circle async transaction model + bridge-saga persistence.** Circle returns a tx-id first,
+   hash after confirmation; `shouldSkipFundOperator`'s balance heuristic is turnkey-only (no
+   seed baseline + job earnings confound it on circle), and `retryOnStaleBalance`'s error-string
+   classifier never matches Circle states. Circle path uses REAL idempotency: deterministic
+   `idempotencyKey` per bridge leg + a persisted `bridge_legs` saga row (leg × circle-tx-id ×
+   state) resumed by querying Circle — never by balance inference. Submit→poll with hard
+   timeouts and terminal states (`FAILED/DENIED` handling).
+
+### High
+
+4. **Per-surface provider dispatch table.** The compatibility guarantee currently dies at two
+   chokepoints that hard-require Turnkey fields (`requireVaultOperator`, `runJob`'s
+   `turnkeySubOrgId` guard — verified). P1 enumerates, per surface × provider: fundPocket, job
+   steps 2/3/4.5, standingExposure, sweeps, gas seeder. Precision fixes: POCKET seed/sweep die
+   fleet-wide (both paths — the pocket never transacts); OPERATOR gas-seed stays turnkey-only;
+   the JOB-EARNINGS sweep (operator→treasury) survives on BOTH paths — `complete` still pays
+   the operator SCA. "Sweeps die" in the deletions list means pocket sweeps only.
+5. **S5 meter integration.** New outflow path `gas_sponsorship` recorded from UserOp receipts
+   (recorded-not-checked, like `gas_seed`) so Gas Station spend (cost+5%) stays visible to the
+   platform brake; opsLog every Circle mutating call (parity with `turnkey_sig` forensics); a
+   MAW counter (distinct active wallet-ids/month) because THAT is Circle's billing axis — not
+   per-signature parity.
+6. **Concurrency & rate limits.** Per-SCA (= per-entity) serialization must span funding AND
+   job provider ops (today only funding takes the keyed lock); global Circle-API limiter with
+   backoff (~5-10 rps shared per key); hard poll timeouts so the mutex chain cannot wedge; SCA
+   queue-rejection behavior measured in P2 and promoted to a P3 go/no-go gate.
+7. **Schema enumeration.** Beyond `wallet_provider`: `circle_wallet_set_id` (decide one-set vs
+   per-agent), `circle_operator_wallet_id`, `circle_pocket_wallet_id`, `pocket_address`
+   (backfilled for TURNKEY agents too — derive once, store, so read paths stop touching the
+   master seed; killing the seed is unbuildable otherwise), `previous_operator` +
+   `operator_rotated_at` (rotation forensics + late-residue sweeps; a retired EOA otherwise
+   silently exits the S2 exposure reads).
+
+### Medium
+
+8. **Failure-modes table (to write in P1):** Circle API outage = circle-path hot layer fully
+   frozen INCLUDING pay signing (turnkey path keeps working — the redundancy argument, made
+   concrete); bridge legs resumable from the saga on recovery. Gas Station cap exhaustion: the
+   daily USD cap is ACCOUNT-LEVEL PER NETWORK — one runaway agent de-gasleses the whole fleet
+   at once (same outage class as the Turnkey quota event); `gas_sponsorship_denied` opsLog line
+   + P2 captures the denial shape + Vivienne Q: can the testnet 50 USDC/day default be raised?
+9. **Boot invariant is per-path:** `MAX_POCKET_FLOAT >= FUNDING_FLOAT + 2×GAS_SEED_TARGET`
+   stays (max over paths) while any turnkey agent exists; relax to `>= FUNDING_FLOAT` only for
+   provably circle-only deployments. `shouldSkipFundOperator` documented turnkey-only.
+10. **Sovereignty copy scoped:** the passkey outranks the platform for the OPERATOR layer only;
+    the payment float is platform-managed (Circle) on BOTH options, capped at the float ceiling.
+    Card copy must say so — honest framing extends to the UI.
+
+### Fact-check residue
+
+- In-repo contradiction to fix in P1: `agentkitSigner.ts` comments claim the pocket "is the
+  address registered in AgentBook" — aspirational; only the /proof demo key is registered.
+  Correct the comment; verify the fleet claim with one `lookupHuman(pocket)` read per agent
+  (the agentBookReader makes it a one-liner) before relying on it in the migration.
+- `depositFor` "anyone can credit any depositor" is SDK-semantics-corroborated, not proven
+  on-chain → add to the P2 experiment.
+- DevC single-call API claim: cite the OpenAPI explicitly in P1; note `circle_6900_singleowner_v3`
+  docs say the ACCOUNT can batch userOps even if the REST surface doesn't expose it (Vivienne Q3
+  sharpened).
+- Unverifiable-by-repo items held as assumptions with named owners: Vivienne's mainnet/policy
+  statements (private correspondence), Turnkey plan terms (account), pocket non-registration
+  (chain read, above).
