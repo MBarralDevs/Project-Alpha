@@ -69,6 +69,29 @@ the operator SCA (`depositFor`), x402/burn-intent typed data is signed through C
 `sign/typedData` endpoint behind our existing `signX402`/signer seam (which is already
 injectable — verified).
 
+### DECISION (2026-08-03, user): custody becomes a CHOICE, Turnkey stays
+
+Turnkey is NOT retired. `wallet_provider` is a permanent product surface, not migration
+scaffolding — the guardian chooses the agent's custody posture at creation, mirroring the
+trust-policy dial:
+
+- **`circle` ("Novi-managed") — the DEFAULT for new agents**: platform-controlled hot layer via
+  Circle DevC (SCA operator + EOA pocket), gasless, no signature metering.
+- **`turnkey` ("passkey-rooted") — the sovereignty option**: the guardian's own passkey stays
+  root of the operator's key vault, above the platform. Deliberate opt-in; this path keeps the
+  gas-seeder/sweep plumbing and the metered Turnkey signature costs (document both to the user).
+- **Model B ("self-custody", later)** — Circle user-controlled wallets; the human holds keys
+  outright. Roadmap tier three.
+
+Custody clarification that shapes the split: the POCKET has NO custody implications — it is
+already pure platform custody today (derived from OUR master seed), implemented dangerously.
+So the pocket migrates to a per-agent Circle EOA for **every** agent, both providers, killing
+S3 fleet-wide. Only the OPERATOR carries the custody choice.
+
+Consequence accepted: the plumbing-deletion wins become per-agent rather than codebase-wide —
+gasSeeder/sweeps stay in the tree for `turnkey`-path agents, and the funding-path test matrix
+covers both providers.
+
 ### What this migration honestly does NOT do
 
 - **S2 stays interim.** With Circle's policy engine unbuilt and Gas Station policies coarse, the
@@ -77,11 +100,11 @@ injectable — verified).
   policy controls (we are offered as design partner) or if custom ERC-6900 modules become
   installable on their accounts (not documented today). *This corrects an earlier optimistic
   framing — the migration's security wins are S3 + S4 + blast-radius, not S2-full.*
-- **Custody story shifts for the hot layer**: Turnkey's guardian-passkey-rooted sub-orgs give way
-  to platform-controlled Circle wallets (entity secret). Guardian sovereignty remains anchored
-  on-chain (guardian role, `setOperator`, clawback) + `root_passkey_id` (#67) + World personhood
-  — but the design must state the shift plainly. Self-sovereign hot wallets = Model B (Circle
-  user-controlled), later.
+- **Custody does not silently shift — it becomes explicit**: on the `circle` path the operator's
+  hot-layer keys are platform-controlled (Circle entity secret) instead of guardian-passkey-rooted;
+  the guardian keeps every on-chain power (guardian role, `setOperator`, clawback) +
+  `root_passkey_id` (#67) + World personhood. Guardians who want key-level rootship above the
+  platform choose the `turnkey` option; full self-custody = Model B, later.
 
 ### Migration mechanics for existing agents (the contracts already have the hook)
 
@@ -107,9 +130,11 @@ registered; only the standalone proof-demo key is).
   live-registry `setAgentWallet` 1271 fork test.
 - **P3 — first migrated agent end-to-end** on the flag (a fresh test agent, then one existing via
   the rotation runbook). Compare: bridge legs, signature spend (meter says 0 Turnkey), gas cost.
-- **P4 — default flip for new onboarding; migrate the fleet; retire** gasSeeder/pocketFloat/
-  master-seed surfaces + Turnkey adapters (keep-or-kill decision on Turnkey per the guardian
-  custody story). S4 split (`JOB_CLIENT`/`CUSTOMER` keys) can ship independently and early — small PR.
+- **P4 — default `circle` for new onboarding; offer migration to existing agents (guardian's
+  choice, not forced); retire ONLY the master-seed pocket path** (S3 dies fleet-wide once all
+  pockets are per-agent Circle EOAs). Turnkey adapters STAY as the passkey-rooted option per the
+  custody decision above. Onboarding UI/MCP gain the custody selector. S4 split
+  (`JOB_CLIENT`/`CUSTOMER` keys) can ship independently and early — small PR.
 
 ## Open questions (owners assigned)
 
