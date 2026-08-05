@@ -1,4 +1,5 @@
 import { PocketGateway } from "../adapters/x402/gateway";
+import { readGatewayAvailableByAddress } from "../adapters/x402/gatewayRead";
 import { derivePocketKey } from "../adapters/x402/pocketDerivation";
 import type { Config } from "../config/env";
 import type { Address, EntityRecord, Hex } from "../types";
@@ -41,26 +42,42 @@ export interface ExposureBalanceReader {
 }
 
 /**
- * Build a per-entity `readStandingExposure` closure: derives the pocket key from
- * `cfg.pocketMasterSeed` + the entity's idempotency key, constructs a throwaway `PocketGateway`,
- * and sums operator EOA + pocket EOA + Gateway via `readStandingExposure` above. Shared wiring for
- * `entityPayment.status()` (`payments/entityPayment.ts`) and `GET /entities/:id/treasury`
- * (`api/routes/treasury.ts`) so both compute standing exposure identically — do not duplicate this
- * closure elsewhere.
+ * Build a per-entity `readStandingExposure` closure and sum operator EOA/SCA + pocket EOA +
+ * Gateway via `readStandingExposure` above. Shared wiring for `entityPayment.status()`
+ * (`payments/entityPayment.ts`) and `GET /entities/:id/treasury` (`api/routes/treasury.ts`) so
+ * both compute standing exposure identically — do not duplicate this closure elsewhere.
+ *
+ * Tier-0 dispatch (audit items 4+7): when the entity's pocket ADDRESS is stored (backfilled for
+ * every agent in P1a; written at creation for new ones), the Gateway balance is read BY ADDRESS —
+ * no key derivation, so read paths stop touching POCKET_MASTER_SEED, and circle-path pockets
+ * (whose keys live in Circle MPC, underivable here) read identically. SAME SOURCE as before
+ * (the Gateway facilitator API view — see gatewayRead.ts), so turnkey numbers are unchanged.
+ * Legacy rows without a stored address fall back to seed derivation (turnkey-only by
+ * construction).
  */
 export function buildReadExposure(
-  cfg: Pick<Config, "pocketMasterSeed" | "rpcUrl" | "usdc">,
+  cfg: Pick<Config, "pocketMasterSeed" | "rpcUrl" | "usdc" | "chainId">,
   reader: ExposureBalanceReader,
 ): (entity: EntityRecord) => Promise<StandingExposure> {
   return (entity: EntityRecord) => {
-    const pocketKey = derivePocketKey(requirePocketMasterSeed(cfg), entity.idempotencyKey);
-    const gateway = new PocketGateway({ pocketPrivateKey: pocketKey, rpcUrl: cfg.rpcUrl });
+    const usdc = entity.treasuryConfig?.usdc ?? cfg.usdc;
+    let pocket: Address;
+    let gatewayAvailable: () => Promise<number>;
+    if (entity.pocketAddress) {
+      pocket = entity.pocketAddress as Address;
+      gatewayAvailable = () =>
+        readGatewayAvailableByAddress({ rpcUrl: cfg.rpcUrl, depositor: pocket });
+    } else {
+      const pocketKey = derivePocketKey(requirePocketMasterSeed(cfg), entity.idempotencyKey);
+      const gateway = new PocketGateway({ pocketPrivateKey: pocketKey, rpcUrl: cfg.rpcUrl });
+      pocket = gateway.address;
+      gatewayAvailable = () => gateway.getAvailable();
+    }
     return readStandingExposure({
-      usdcBalanceOf: (owner) =>
-        reader.usdcBalanceOf(entity.treasuryConfig?.usdc ?? cfg.usdc, owner),
-      gatewayAvailable: () => gateway.getAvailable(),
+      usdcBalanceOf: (owner) => reader.usdcBalanceOf(usdc, owner),
+      gatewayAvailable,
       operator: entity.operator as Address,
-      pocket: gateway.address,
+      pocket,
     });
   };
 }
